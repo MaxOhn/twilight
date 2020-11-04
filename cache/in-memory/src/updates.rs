@@ -1,9 +1,14 @@
 use super::{config::EventType, InMemoryCache};
 use dashmap::DashMap;
-use std::{borrow::Cow, collections::HashSet, hash::Hash, ops::Deref, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashSet},
+    hash::Hash,
+    ops::Deref,
+    sync::Arc,
+};
 use twilight_model::{
-    channel::{message::MessageReaction, Channel, GuildChannel},
-    gateway::{event::Event, payload::*, presence::Presence},
+    channel::{message::MessageReaction, Channel},
+    gateway::{event::Event, payload::*},
     guild::GuildStatus,
     id::GuildId,
 };
@@ -28,7 +33,7 @@ impl UpdateCache for Event {
             BanRemove(_) => {}
             ChannelCreate(v) => c.update(v),
             ChannelDelete(v) => c.update(v),
-            ChannelPinsUpdate(v) => c.update(v),
+            ChannelPinsUpdate(_) => {}
             ChannelUpdate(v) => c.update(v),
             GatewayHeartbeat(_) => {}
             GatewayHeartbeatAck => {}
@@ -38,8 +43,8 @@ impl UpdateCache for Event {
             GiftCodeUpdate => {}
             GuildCreate(v) => c.update(v.deref()),
             GuildDelete(v) => c.update(v.deref()),
-            GuildEmojisUpdate(v) => c.update(v),
-            GuildIntegrationsUpdate(v) => c.update(v),
+            GuildEmojisUpdate(_) => {}
+            GuildIntegrationsUpdate(_) => {}
             GuildUpdate(v) => c.update(v.deref()),
             InviteCreate(_) => {}
             InviteDelete(_) => {}
@@ -51,7 +56,7 @@ impl UpdateCache for Event {
             MessageDelete(v) => c.update(v),
             MessageDeleteBulk(v) => c.update(v),
             MessageUpdate(v) => c.update(v.deref()),
-            PresenceUpdate(v) => c.update(v.deref()),
+            PresenceUpdate(_) => {}
             PresencesReplace => {}
             ReactionAdd(v) => c.update(v.deref()),
             ReactionRemove(v) => c.update(v.deref()),
@@ -69,19 +74,15 @@ impl UpdateCache for Event {
             ShardReconnecting(_) => {}
             ShardPayload(_) => {}
             ShardResuming(_) => {}
-            TypingStart(v) => c.update(v.deref()),
+            TypingStart(_) => {}
             UnavailableGuild(v) => c.update(v),
             UserUpdate(v) => c.update(v),
-            VoiceServerUpdate(v) => c.update(v),
-            VoiceStateUpdate(v) => c.update(v.deref()),
-            WebhooksUpdate(v) => c.update(v),
+            VoiceServerUpdate(_) => {}
+            VoiceStateUpdate(_) => {}
+            WebhooksUpdate(_) => {}
         }
     }
 }
-
-impl UpdateCache for BanAdd {}
-
-impl UpdateCache for BanRemove {}
 
 impl UpdateCache for ChannelCreate {
     fn update(&self, cache: &InMemoryCache) {
@@ -121,34 +122,6 @@ impl UpdateCache for ChannelDelete {
             Channel::Private(ref c) => {
                 cache.0.channels_private.remove(&c.id);
             }
-        }
-    }
-}
-
-impl UpdateCache for ChannelPinsUpdate {
-    fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::CHANNEL_PINS_UPDATE) {
-            return;
-        }
-
-        if let Some(mut item) = cache.0.channels_guild.get_mut(&self.channel_id) {
-            let channel = Arc::make_mut(&mut item.data);
-
-            if let GuildChannel::Text(text) = channel {
-                text.last_pin_timestamp = self.last_pin_timestamp.clone();
-            }
-
-            return;
-        }
-
-        if let Some(mut channel) = cache.0.channels_private.get_mut(&self.channel_id) {
-            Arc::make_mut(&mut channel).last_pin_timestamp = self.last_pin_timestamp.clone();
-
-            return;
-        }
-
-        if let Some(mut group) = cache.0.groups.get_mut(&self.channel_id) {
-            Arc::make_mut(&mut group).last_pin_timestamp = self.last_pin_timestamp.clone();
         }
     }
 }
@@ -208,36 +181,15 @@ impl UpdateCache for GuildDelete {
         cache.0.guilds.remove(&id);
 
         remove_ids(&cache.0.guild_channels, &cache.0.channels_guild, id);
-        remove_ids(&cache.0.guild_emojis, &cache.0.emojis, id);
         remove_ids(&cache.0.guild_roles, &cache.0.roles, id);
-        // Clear out a guilds voice states when a guild leaves
-        cache.0.voice_state_guilds.remove(&id);
 
         if let Some((_, ids)) = cache.0.guild_members.remove(&id) {
             for user_id in ids {
                 cache.0.members.remove(&(id, user_id));
             }
         }
-
-        if let Some((_, ids)) = cache.0.guild_presences.remove(&id) {
-            for user_id in ids {
-                cache.0.presences.remove(&(id, user_id));
-            }
-        }
     }
 }
-
-impl UpdateCache for GuildEmojisUpdate {
-    fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::GUILD_EMOJIS_UPDATE) {
-            return;
-        }
-
-        cache.cache_emojis(self.guild_id, self.emojis.values().cloned());
-    }
-}
-
-impl UpdateCache for GuildIntegrationsUpdate {}
 
 impl UpdateCache for GuildUpdate {
     fn update(&self, cache: &InMemoryCache) {
@@ -247,32 +199,12 @@ impl UpdateCache for GuildUpdate {
 
         if let Some(mut guild) = cache.0.guilds.get_mut(&self.0.id) {
             let mut guild = Arc::make_mut(&mut guild);
-            guild.afk_channel_id = self.afk_channel_id;
-            guild.afk_timeout = self.afk_timeout;
-            guild.banner = self.banner.clone();
-            guild.default_message_notifications = self.default_message_notifications;
-            guild.description = self.description.clone();
-            guild.features = self.features.clone();
             guild.icon = self.icon.clone();
             guild.max_members = self.max_members;
-            guild.max_presences = Some(self.max_presences.unwrap_or(25000));
-            guild.mfa_level = self.mfa_level;
             guild.name = self.name.clone();
-            guild.owner = self.owner;
             guild.owner_id = self.owner_id;
             guild.permissions = self.permissions;
-            guild.preferred_locale = self.preferred_locale.clone();
-            guild.premium_tier = self.premium_tier;
-            guild
-                .premium_subscription_count
-                .replace(self.premium_subscription_count.unwrap_or_default());
-            guild.region = self.region.clone();
-            guild.splash = self.splash.clone();
             guild.system_channel_id = self.system_channel_id;
-            guild.verification_level = self.verification_level;
-            guild.vanity_url_code = self.vanity_url_code.clone();
-            guild.widget_channel_id = self.widget_channel_id;
-            guild.widget_enabled = self.widget_enabled;
         };
     }
 }
@@ -355,7 +287,6 @@ impl UpdateCache for MemberUpdate {
 
         member.nick = self.nick.clone();
         member.roles = self.roles.clone();
-        member.joined_at.replace(self.joined_at.clone());
     }
 }
 
@@ -375,9 +306,22 @@ impl UpdateCache for MessageCreate {
 
         channel.insert(self.0.id, Arc::new(From::from(self.0.clone())));
 
-        let user = cache.cache_user(Cow::Borrowed(&self.author), self.guild_id);
+        let user = if let Some(guard) = cache.0.users.get(&self.0.author.id) {
+            Arc::clone(&guard.value().0)
+        } else {
+            let user = Arc::new(self.0.author.to_owned());
+            let mut guild_id_set = BTreeSet::new();
+            if let Some(guild_id) = self.0.guild_id {
+                guild_id_set.insert(guild_id);
+            }
+            cache
+                .0
+                .users
+                .insert(user.id, (Arc::clone(&user), guild_id_set));
+            user
+        };
 
-        if let (Some(member), Some(guild_id)) = (&self.member, self.guild_id) {
+        if let (Some(member), Some(guild_id)) = (&self.0.member, self.0.guild_id) {
             cache.cache_borrowed_partial_member(guild_id, member, user);
         }
     }
@@ -459,24 +403,6 @@ impl UpdateCache for MessageUpdate {
                 msg.tts = tts;
             }
         }
-    }
-}
-
-impl UpdateCache for PresenceUpdate {
-    fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::PRESENCE_UPDATE) {
-            return;
-        }
-
-        let presence = Presence {
-            activities: self.activities.clone(),
-            client_status: self.client_status.clone(),
-            guild_id: self.guild_id,
-            status: self.status,
-            user: self.user.clone(),
-        };
-
-        cache.cache_presence(self.guild_id, presence);
     }
 }
 
@@ -627,8 +553,6 @@ impl UpdateCache for RoleUpdate {
     }
 }
 
-impl UpdateCache for TypingStart {}
-
 impl UpdateCache for UnavailableGuild {
     fn update(&self, cache: &InMemoryCache) {
         if !guard(cache, EventType::UNAVAILABLE_GUILD) {
@@ -650,26 +574,6 @@ impl UpdateCache for UserUpdate {
     }
 }
 
-impl UpdateCache for VoiceServerUpdate {
-    fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::VOICE_SERVER_UPDATE) {
-            return;
-        }
-    }
-}
-
-impl UpdateCache for VoiceStateUpdate {
-    fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::VOICE_STATE_UPDATE) {
-            return;
-        }
-
-        cache.cache_voice_state(self.0.clone());
-    }
-}
-
-impl UpdateCache for WebhooksUpdate {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -687,7 +591,6 @@ mod tests {
         guild::SystemChannelFlags,
         guild::VerificationLevel,
         id::{ChannelId, GuildId, UserId},
-        voice::VoiceState,
     };
 
     fn guild_channel_text() -> (GuildId, ChannelId, GuildChannel) {
@@ -838,28 +741,6 @@ mod tests {
             .get(&guild_id)
             .unwrap()
             .contains(&channel_id));
-    }
-
-    #[test]
-    fn test_voice_states_with_no_cached_guilds() {
-        let cache = InMemoryCache::builder()
-            .event_types(EventType::VOICE_STATE_UPDATE)
-            .build();
-
-        cache.update(&VoiceStateUpdate(VoiceState {
-            channel_id: None,
-            deaf: false,
-            guild_id: Some(GuildId(1)),
-            member: None,
-            mute: false,
-            self_deaf: false,
-            self_mute: false,
-            self_stream: false,
-            session_id: "38fj3jfkh3pfho3prh2".to_string(),
-            suppress: false,
-            token: None,
-            user_id: UserId(1),
-        }));
     }
 
     #[test]

@@ -1,58 +1,64 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use twilight_model::{
     guild::{Member, PartialMember},
-    id::{GuildId, RoleId},
+    id::{GuildId, RoleId, UserId},
     user::User,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct CachedMember {
-    pub deaf: bool,
+    pub user_id: UserId,
     pub guild_id: GuildId,
-    pub joined_at: Option<String>,
-    pub mute: bool,
     pub nick: Option<String>,
-    pub premium_since: Option<String>,
     pub roles: Vec<RoleId>,
     pub user: Arc<User>,
 }
 
 impl PartialEq<Member> for CachedMember {
     fn eq(&self, other: &Member) -> bool {
-        (
-            self.deaf,
-            self.joined_at.as_ref(),
-            self.mute,
-            &self.nick,
-            self.premium_since.as_ref(),
-            &self.roles,
-        ) == (
-            other.deaf,
-            other.joined_at.as_ref(),
-            other.mute,
-            &other.nick,
-            other.premium_since.as_ref(),
-            &other.roles,
-        )
+        self.nick == other.nick && self.roles == other.roles
     }
 }
 
 impl PartialEq<&PartialMember> for CachedMember {
     fn eq(&self, other: &&PartialMember) -> bool {
-        (
-            self.deaf,
-            self.joined_at.as_ref(),
-            self.mute,
-            &self.nick,
-            &self.roles,
-        ) == (
-            other.deaf,
-            other.joined_at.as_ref(),
-            other.mute,
-            &other.nick,
-            &other.roles,
-        )
+        self.nick == other.nick && self.roles == other.roles
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ColdStorageMember {
+    #[serde(rename = "a")]
+    pub user_id: UserId,
+    #[serde(rename = "b")]
+    pub guild_id: GuildId,
+    #[serde(rename = "c", default, skip_serializing_if = "Option::is_none")]
+    pub nick: Option<String>,
+    #[serde(rename = "d", default, skip_serializing_if = "Vec::is_empty")]
+    pub roles: Vec<RoleId>,
+}
+
+impl ColdStorageMember {
+    pub(crate) fn into_cached_member(self, user: Arc<User>) -> CachedMember {
+        CachedMember {
+            user_id: self.user_id,
+            guild_id: self.guild_id,
+            nick: self.nick,
+            roles: self.roles,
+            user,
+        }
+    }
+}
+
+impl From<Arc<CachedMember>> for ColdStorageMember {
+    fn from(member: Arc<CachedMember>) -> Self {
+        Self {
+            user_id: member.user_id,
+            guild_id: member.guild_id,
+            nick: member.nick.to_owned(),
+            roles: member.roles.to_owned(),
+        }
     }
 }
 
@@ -68,14 +74,11 @@ mod tests {
 
     fn cached_member() -> CachedMember {
         CachedMember {
-            deaf: false,
             guild_id: GuildId(3),
-            joined_at: None,
-            mute: true,
             nick: Some("member nick".to_owned()),
-            premium_since: None,
             roles: Vec::new(),
             user: Arc::new(user()),
+            user_id: UserId(1),
         }
     }
 

@@ -16,9 +16,14 @@ version = "0.2.1"
 
 [dependencies]
 bitflags = { default-features = false, version = "1" }
+darkredis = { default-features = false, version = "0.7", features = ["runtime_tokio"] }
 dashmap = { default-features = false, version = "3" }
+futures = "0.3"
+log = "0.4"
 serde = { default-features = false, features = ["derive", "rc"], version = "1" }
+serde_json = { default-features = false, version = "1" }
 twilight-model = { default-features = false, path = "../../model" }
+twilight-gateway = { path = "../../gateway" }
 tracing = { default-features = false, features = ["std", "attributes"], version = "0.1" }
 
 [dev-dependencies]
