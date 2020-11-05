@@ -120,7 +120,9 @@ impl UpdateCache for ChannelDelete {
                 cache.delete_guild_channel(c.id());
             }
             Channel::Private(ref c) => {
-                cache.0.channels_private.remove(&c.id);
+                if let Some(user) = c.recipients.first() {
+                    cache.0.channels_private.remove(&user.id);
+                }
             }
         }
     }

@@ -133,7 +133,7 @@ fn upsert_item<K: Eq + Hash, V: PartialEq>(map: &DashMap<K, Arc<V>>, k: K, v: V)
 struct InMemoryCacheRef {
     config: Arc<Config>,
     channels_guild: DashMap<ChannelId, GuildItem<GuildChannel>>,
-    channels_private: DashMap<ChannelId, Arc<PrivateChannel>>,
+    channels_private: DashMap<UserId, Arc<PrivateChannel>>,
     // So long as the lock isn't held across await or panic points this is fine.
     current_user: Mutex<Option<Arc<CurrentUser>>>,
     emojis: DashMap<EmojiId, GuildItem<CachedEmoji>>,
@@ -358,7 +358,7 @@ impl InMemoryCache {
         channel.get(&message_id).cloned()
     }
 
-    /// Gets a latest message by channel ID that returns `Some` through the given function.
+    /// Gets the latest message by channel ID that returns `Some` through the given function.
     ///
     /// This is an O(n) operation. This requires one or both of the
     /// [`GUILD_MESSAGES`] or [`DIRECT_MESSAGES`] intents.
@@ -397,10 +397,10 @@ impl InMemoryCache {
     /// This is an O(1) operation. This requires the [`DIRECT_MESSAGES`] intent.
     ///
     /// [`DIRECT_MESSAGES`]: ../twilight_model/gateway/struct.Intents.html#associatedconstant.DIRECT_MESSAGES
-    pub fn private_channel(&self, channel_id: ChannelId) -> Option<Arc<PrivateChannel>> {
+    pub fn private_channel(&self, user_id: UserId) -> Option<Arc<PrivateChannel>> {
         self.0
             .channels_private
-            .get(&channel_id)
+            .get(&user_id)
             .map(|r| Arc::clone(r.value()))
     }
 
@@ -624,14 +624,20 @@ impl InMemoryCache {
         }
     }
 
-    fn cache_private_channel(&self, private_channel: PrivateChannel) {
-        let id = private_channel.id;
+    pub fn cache_private_channel(&self, private_channel: PrivateChannel) -> Arc<PrivateChannel> {
+        let id = private_channel
+            .recipients
+            .first()
+            .expect("no recipients for private channel")
+            .id;
 
         match self.0.channels_private.get(&id) {
-            Some(c) if **c == private_channel => {}
+            Some(c) if **c == private_channel => Arc::clone(c.value()),
             Some(_) | None => {
                 let v = Arc::new(private_channel);
-                self.0.channels_private.insert(id, v);
+                self.0.channels_private.insert(id, Arc::clone(&v));
+
+                v
             }
         }
     }
