@@ -358,6 +358,40 @@ impl InMemoryCache {
         channel.get(&message_id).cloned()
     }
 
+    /// Gets a latest message by channel ID that returns `Some` through the given function.
+    ///
+    /// This is an O(n) operation. This requires one or both of the
+    /// [`GUILD_MESSAGES`] or [`DIRECT_MESSAGES`] intents.
+    pub fn message_extract<T>(
+        &self,
+        channel_id: ChannelId,
+        f: impl Fn(&CachedMessage) -> Option<T>,
+    ) -> Option<T> {
+        let channel = self.0.messages.get(&channel_id)?;
+
+        channel.iter().filter_map(|(_, msg)| f(msg)).next_back()
+    }
+
+    /// Gets the earliest message of a channel ID.
+    ///
+    /// This is an O(1) operation. This requires one or both of the
+    /// [`GUILD_MESSAGES`] or [`DIRECT_MESSAGES`] intents.
+    pub fn first_message(&self, channel_id: ChannelId) -> Option<MessageId> {
+        let channel = self.0.messages.get(&channel_id)?;
+
+        channel.iter().next().map(|(msg_id, _)| *msg_id)
+    }
+
+    /// Gets the latest message of a channel ID.
+    ///
+    /// This is an O(1) operation. This requires one or both of the
+    /// [`GUILD_MESSAGES`] or [`DIRECT_MESSAGES`] intents.
+    pub fn last_message(&self, channel_id: ChannelId) -> Option<MessageId> {
+        let channel = self.0.messages.get(&channel_id)?;
+
+        channel.iter().next_back().map(|(msg_id, _)| *msg_id)
+    }
+
     /// Gets a private channel by ID.
     ///
     /// This is an O(1) operation. This requires the [`DIRECT_MESSAGES`] intent.
