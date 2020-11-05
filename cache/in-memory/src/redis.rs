@@ -10,7 +10,7 @@ use std::{
     collections::{HashMap, HashSet},
     error::Error,
     ops::Deref,
-    sync::Arc,
+    sync::{atomic::Ordering::Relaxed, Arc},
     time::Instant,
 };
 use twilight_gateway::shard::ResumeSession;
@@ -70,6 +70,25 @@ impl InMemoryCache {
                     error!("Cold resume defrosting failed ({}): {}", cause, why);
                     cache.clear();
                 } else {
+                    cache
+                        .0
+                        .metrics
+                        .channels_guild
+                        .store(cache.0.channels_guild.len(), Relaxed);
+                    cache.0.metrics.emojis.store(cache.0.emojis.len(), Relaxed);
+                    cache.0.metrics.guilds.store(cache.0.guilds.len(), Relaxed);
+                    cache
+                        .0
+                        .metrics
+                        .members
+                        .store(cache.0.members.len(), Relaxed);
+                    cache.0.metrics.roles.store(cache.0.roles.len(), Relaxed);
+                    cache
+                        .0
+                        .metrics
+                        .unavailable_guilds
+                        .store(cache.0.unavailable_guilds.len(), Relaxed);
+                    cache.0.metrics.users.store(cache.0.users.len(), Relaxed);
                     let end = Instant::now();
                     debug!(
                         "Cold resume defrosting completed in {}ms",
