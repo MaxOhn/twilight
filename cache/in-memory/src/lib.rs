@@ -55,11 +55,13 @@ pub mod model;
 mod builder;
 mod config;
 mod redis;
+mod stats;
 mod updates;
 
 pub use self::{
     builder::InMemoryCacheBuilder,
     config::{Config, EventType},
+    stats::{CacheStats, CompactGuild, CompactUser, Metrics},
     updates::UpdateCache,
 };
 
@@ -67,9 +69,9 @@ use self::model::*;
 use dashmap::{mapref::entry::Entry, DashMap, DashSet};
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeSet, HashSet, VecDeque},
     hash::Hash,
-    sync::{Arc, Mutex},
+    sync::{atomic::Ordering::Relaxed, Arc, Mutex},
 };
 use twilight_model::{
     channel::{Group, GuildChannel, PrivateChannel},
@@ -111,24 +113,6 @@ fn upsert_guild_item<K: Eq + Hash, V: PartialEq>(
     }
 }
 
-fn upsert_item<K: Eq + Hash, V: PartialEq>(map: &DashMap<K, Arc<V>>, k: K, v: V) -> Arc<V> {
-    match map.entry(k) {
-        Entry::Occupied(e) if **e.get() == v => Arc::clone(e.get()),
-        Entry::Occupied(mut e) => {
-            let v = Arc::new(v);
-            e.insert(Arc::clone(&v));
-
-            v
-        }
-        Entry::Vacant(e) => {
-            let v = Arc::new(v);
-            e.insert(Arc::clone(&v));
-
-            v
-        }
-    }
-}
-
 #[derive(Debug, Default)]
 struct InMemoryCacheRef {
     config: Arc<Config>,
@@ -144,10 +128,11 @@ struct InMemoryCacheRef {
     guild_members: DashMap<GuildId, HashSet<UserId>>,
     guild_roles: DashMap<GuildId, HashSet<RoleId>>,
     members: DashMap<(GuildId, UserId), Arc<CachedMember>>,
-    messages: DashMap<ChannelId, BTreeMap<MessageId, Arc<CachedMessage>>>,
+    messages: DashMap<ChannelId, VecDeque<Arc<CachedMessage>>>,
     roles: DashMap<RoleId, GuildItem<Role>>,
     unavailable_guilds: DashSet<GuildId>,
     users: DashMap<UserId, (Arc<User>, BTreeSet<GuildId>)>,
+    metrics: Arc<Metrics>,
 }
 
 /// A thread-safe, in-memory-process cache of Discord data. It can be cloned and
@@ -341,23 +326,6 @@ impl InMemoryCache {
             .map(|r| Arc::clone(r.value()))
     }
 
-    /// Gets a message by channel ID and message ID.
-    ///
-    /// This is an O(log n) operation. This requires one or both of the
-    /// [`GUILD_MESSAGES`] or [`DIRECT_MESSAGES`] intents.
-    ///
-    /// [`GUILD_MESSAGES`]: ../twilight_model/gateway/struct.Intents.html#associatedconstant.GUILD_MESSAGES
-    /// [`DIRECT_MESSAGES`]: ../twilight_model/gateway/struct.Intents.html#associatedconstant.DIRECT_MESSAGES
-    pub fn message(
-        &self,
-        channel_id: ChannelId,
-        message_id: MessageId,
-    ) -> Option<Arc<CachedMessage>> {
-        let channel = self.0.messages.get(&channel_id)?;
-
-        channel.get(&message_id).cloned()
-    }
-
     /// Gets the latest message by channel ID that returns `Some` through the given function.
     ///
     /// This is an O(n) operation. This requires one or both of the
@@ -369,7 +337,7 @@ impl InMemoryCache {
     ) -> Option<T> {
         let channel = self.0.messages.get(&channel_id)?;
 
-        channel.iter().filter_map(|(_, msg)| f(msg)).next_back()
+        channel.iter().find_map(|msg| f(msg))
     }
 
     /// Gets the earliest message of a channel ID.
@@ -379,7 +347,7 @@ impl InMemoryCache {
     pub fn first_message(&self, channel_id: ChannelId) -> Option<MessageId> {
         let channel = self.0.messages.get(&channel_id)?;
 
-        channel.iter().next().map(|(msg_id, _)| *msg_id)
+        channel.iter().next_back().map(|msg| msg.id)
     }
 
     /// Gets the latest message of a channel ID.
@@ -389,7 +357,7 @@ impl InMemoryCache {
     pub fn last_message(&self, channel_id: ChannelId) -> Option<MessageId> {
         let channel = self.0.messages.get(&channel_id)?;
 
-        channel.iter().next_back().map(|(msg_id, _)| *msg_id)
+        channel.iter().next().map(|msg| msg.id)
     }
 
     /// Gets a private channel by ID.
@@ -488,13 +456,35 @@ impl InMemoryCache {
             .or_default()
             .insert(id);
 
-        upsert_guild_item(&self.0.channels_guild, guild_id, id, channel)
+        match self.0.channels_guild.entry(id) {
+            Entry::Occupied(e) if *e.get().data == channel => Arc::clone(&e.get().data),
+            Entry::Occupied(mut e) => {
+                let channel = Arc::new(channel);
+                e.insert(GuildItem {
+                    data: Arc::clone(&channel),
+                    guild_id,
+                });
+
+                channel
+            }
+            Entry::Vacant(e) => {
+                self.0.metrics.channels_guild.fetch_add(1, Relaxed);
+                let item = GuildItem {
+                    data: Arc::new(channel),
+                    guild_id,
+                };
+                Arc::clone(&e.insert(item).data)
+            }
+        }
     }
 
     fn cache_emoji(&self, guild_id: GuildId, emoji: Emoji) {
         match self.0.emojis.get(&emoji.id) {
             Some(e) if *e.data == emoji => return,
-            Some(_) | None => {}
+            Some(_) => {}
+            None => {
+                self.0.metrics.emojis.fetch_add(1, Relaxed);
+            }
         }
 
         if let Some(user) = emoji.user {
@@ -532,16 +522,70 @@ impl InMemoryCache {
     }
 
     fn cache_group(&self, group: Group) -> Arc<Group> {
-        upsert_item(&self.0.groups, group.id, group)
+        match self.0.groups.entry(group.id) {
+            Entry::Occupied(e) if **e.get() == group => Arc::clone(e.get()),
+            Entry::Occupied(mut e) => {
+                let group = Arc::new(group);
+                e.insert(Arc::clone(&group));
+
+                group
+            }
+            Entry::Vacant(e) => {
+                let group = Arc::new(group);
+                e.insert(Arc::clone(&group));
+
+                group
+            }
+        }
     }
 
     fn cache_guild(&self, guild: Guild) {
         // The map and set creation needs to occur first, so caching states and objects
         // always has a place to put them.
-        self.0.guild_channels.insert(guild.id, HashSet::new());
-        self.0.guild_emojis.insert(guild.id, HashSet::new());
-        self.0.guild_members.insert(guild.id, HashSet::new());
-        self.0.guild_roles.insert(guild.id, HashSet::new());
+        self.0
+            .guild_channels
+            .entry(guild.id)
+            .and_modify(|channels| {
+                let _ = self
+                    .0
+                    .metrics
+                    .channels_guild
+                    .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(channels.len())));
+            })
+            .or_default();
+        self.0
+            .guild_emojis
+            .entry(guild.id)
+            .and_modify(|channels| {
+                let _ = self
+                    .0
+                    .metrics
+                    .emojis
+                    .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(channels.len())));
+            })
+            .or_default();
+        self.0
+            .guild_members
+            .entry(guild.id)
+            .and_modify(|channels| {
+                let _ = self
+                    .0
+                    .metrics
+                    .members
+                    .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(channels.len())));
+            })
+            .or_default();
+        self.0
+            .guild_roles
+            .entry(guild.id)
+            .and_modify(|channels| {
+                let _ = self
+                    .0
+                    .metrics
+                    .roles
+                    .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(channels.len())));
+            })
+            .or_default();
 
         self.cache_guild_channels(guild.id, guild.channels.into_iter().map(|(_, v)| v));
         self.cache_emojis(guild.id, guild.emojis.into_iter().map(|(_, v)| v));
@@ -560,8 +604,16 @@ impl InMemoryCache {
             unavailable: guild.unavailable,
         };
 
-        self.0.unavailable_guilds.remove(&guild.id);
-        self.0.guilds.insert(guild.id, Arc::new(guild));
+        if self.0.unavailable_guilds.remove(&guild.id).is_some() {
+            let _ = self
+                .0
+                .metrics
+                .unavailable_guilds
+                .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(1)));
+        }
+        if self.0.guilds.insert(guild.id, Arc::new(guild)).is_none() {
+            self.0.metrics.guilds.fetch_add(1, Relaxed);
+        }
     }
 
     fn cache_member(&self, guild_id: GuildId, member: Member) {
@@ -569,7 +621,10 @@ impl InMemoryCache {
         let id = (guild_id, member_id);
         match self.0.members.get(&id) {
             Some(m) if **m == member => return,
-            Some(_) | None => {}
+            Some(_) => {}
+            None => {
+                self.0.metrics.members.fetch_add(1, Relaxed);
+            }
         }
 
         let user = self.cache_user(Cow::Owned(member.user), Some(guild_id));
@@ -597,7 +652,10 @@ impl InMemoryCache {
         let id = (guild_id, user.id);
         match self.0.members.get(&id) {
             Some(m) if **m == member => return Arc::clone(&m),
-            Some(_) | None => {}
+            Some(_) => {}
+            None => {
+                self.0.metrics.members.fetch_add(1, Relaxed);
+            }
         }
 
         self.0
@@ -631,7 +689,12 @@ impl InMemoryCache {
             .expect("no recipients for private channel")
             .id;
 
-        match self.0.channels_private.get(&id) {
+        let entry = self.0.channels_private.get(&id);
+        if entry.is_none() {
+            self.0.metrics.channels_private.fetch_add(1, Relaxed);
+        }
+
+        match entry {
             Some(c) if **c == private_channel => Arc::clone(c.value()),
             Some(_) | None => {
                 let v = Arc::new(private_channel);
@@ -649,15 +712,32 @@ impl InMemoryCache {
     }
 
     fn cache_role(&self, guild_id: GuildId, role: Role) -> Arc<Role> {
-        // Insert the role into the guild_roles map
         self.0
             .guild_roles
             .entry(guild_id)
             .or_default()
             .insert(role.id);
 
-        // Insert the role into the all roles map
-        upsert_guild_item(&self.0.roles, guild_id, role.id, role)
+        match self.0.roles.entry(role.id) {
+            Entry::Occupied(e) if *e.get().data == role => Arc::clone(&e.get().data),
+            Entry::Occupied(mut e) => {
+                let role = Arc::new(role);
+                e.insert(GuildItem {
+                    data: Arc::clone(&role),
+                    guild_id,
+                });
+
+                role
+            }
+            Entry::Vacant(e) => {
+                self.0.metrics.roles.fetch_add(1, Relaxed);
+                let item = GuildItem {
+                    data: Arc::new(role),
+                    guild_id,
+                };
+                Arc::clone(&e.insert(item).data)
+            }
+        }
     }
 
     fn cache_user(&self, user: Cow<User>, guild_id: Option<GuildId>) -> Arc<User> {
@@ -669,7 +749,10 @@ impl InMemoryCache {
 
                 return Arc::clone(&u.value().0);
             }
-            Some(_) | None => {}
+            Some(_) => {}
+            None => {
+                self.0.metrics.users.fetch_add(1, Relaxed);
+            }
         }
         let user = Arc::new(user.into_owned());
         if let Some(guild_id) = guild_id {
@@ -688,7 +771,9 @@ impl InMemoryCache {
     }
 
     fn unavailable_guild(&self, guild_id: GuildId) {
-        self.0.unavailable_guilds.insert(guild_id);
+        if self.0.unavailable_guilds.insert(guild_id) {
+            self.0.metrics.unavailable_guilds.fetch_add(1, Relaxed);
+        }
         self.0.guilds.remove(&guild_id);
     }
 
@@ -703,7 +788,13 @@ impl InMemoryCache {
         };
 
         if let Some(mut guild_channels) = self.0.guild_channels.get_mut(&guild_id) {
-            guild_channels.remove(&channel_id);
+            if guild_channels.remove(&channel_id) {
+                let _ = self
+                    .0
+                    .metrics
+                    .channels_guild
+                    .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(1)));
+            }
         }
     }
 
@@ -714,7 +805,13 @@ impl InMemoryCache {
         };
 
         if let Some(mut roles) = self.0.guild_roles.get_mut(&role.guild_id) {
-            roles.remove(&role_id);
+            if roles.remove(&role_id) {
+                let _ = self
+                    .0
+                    .metrics
+                    .roles
+                    .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(1)));
+            }
         }
     }
 }
