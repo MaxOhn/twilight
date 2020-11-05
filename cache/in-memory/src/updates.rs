@@ -410,10 +410,6 @@ impl UpdateCache for MessageUpdate {
                 msg.content = content.clone();
             }
 
-            if let Some(edited_timestamp) = &self.edited_timestamp {
-                msg.edited_timestamp.replace(edited_timestamp.clone());
-            }
-
             if let Some(embeds) = &self.embeds {
                 msg.embeds = embeds.clone();
             }
@@ -430,16 +426,8 @@ impl UpdateCache for MessageUpdate {
                 msg.mentions = mentions.iter().map(|x| x.id).collect::<Vec<_>>();
             }
 
-            if let Some(pinned) = self.pinned {
-                msg.pinned = pinned;
-            }
-
             if let Some(timestamp) = &self.timestamp {
                 msg.timestamp = timestamp.clone();
-            }
-
-            if let Some(tts) = self.tts {
-                msg.tts = tts;
             }
         }
     }
