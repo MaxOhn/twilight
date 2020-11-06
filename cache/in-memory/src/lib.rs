@@ -551,39 +551,43 @@ impl InMemoryCache {
                     .metrics
                     .channels_guild
                     .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(channels.len())));
+                channels.clear();
             })
             .or_default();
         self.0
             .guild_emojis
             .entry(guild.id)
-            .and_modify(|channels| {
+            .and_modify(|emojis| {
                 let _ = self
                     .0
                     .metrics
                     .emojis
-                    .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(channels.len())));
+                    .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(emojis.len())));
+                emojis.clear();
             })
             .or_default();
         self.0
             .guild_members
             .entry(guild.id)
-            .and_modify(|channels| {
+            .and_modify(|members| {
                 let _ = self
                     .0
                     .metrics
                     .members
-                    .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(channels.len())));
+                    .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(members.len())));
+                members.clear();
             })
             .or_default();
         self.0
             .guild_roles
             .entry(guild.id)
-            .and_modify(|channels| {
+            .and_modify(|roles| {
                 let _ = self
                     .0
                     .metrics
                     .roles
-                    .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(channels.len())));
+                    .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(roles.len())));
+                roles.clear();
             })
             .or_default();
 
@@ -774,7 +778,13 @@ impl InMemoryCache {
         if self.0.unavailable_guilds.insert(guild_id) {
             self.0.metrics.unavailable_guilds.fetch_add(1, Relaxed);
         }
-        self.0.guilds.remove(&guild_id);
+        if self.0.guilds.remove(&guild_id).is_some() {
+            let _ = self
+                .0
+                .metrics
+                .guilds
+                .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(1)));
+        }
     }
 
     /// Delete a guild channel from the cache.
