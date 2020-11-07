@@ -652,10 +652,10 @@ impl InMemoryCache {
         guild_id: GuildId,
         member: &PartialMember,
         user: Arc<User>,
-    ) -> Arc<CachedMember> {
+    ) {
         let id = (guild_id, user.id);
         match self.0.members.get(&id) {
-            Some(m) if **m == member => return Arc::clone(&m),
+            Some(m) if **m == member => return,
             Some(_) => {}
             None => {
                 self.0.metrics.members.fetch_add(1, Relaxed);
@@ -675,9 +675,7 @@ impl InMemoryCache {
             user_id: user.id,
             user,
         });
-        self.0.members.insert(id, Arc::clone(&cached));
-
-        cached
+        self.0.members.insert(id, cached);
     }
 
     fn cache_members(&self, guild_id: GuildId, members: impl IntoIterator<Item = Member>) {
