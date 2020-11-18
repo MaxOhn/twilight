@@ -5,7 +5,7 @@ use std::{
     collections::{BTreeSet, HashSet, VecDeque},
     hash::Hash,
     ops::Deref,
-    sync::Arc,
+    sync::{atomic::Ordering::Relaxed, Arc},
 };
 use twilight_model::{
     channel::{message::MessageReaction, Channel},
@@ -192,7 +192,21 @@ impl UpdateCache for GuildDelete {
 
         let id = self.id;
 
-        cache.0.guilds.remove(&id);
+        if cache.0.guilds.remove(&id).is_some() {
+            let _ = cache
+                .0
+                .metrics
+                .guilds
+                .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(1)));
+        }
+
+        if cache.0.unavailable_guilds.remove(&id).is_some() {
+            let _ = cache
+                .0
+                .metrics
+                .unavailable_guilds
+                .fetch_update(Relaxed, Relaxed, |n| Some(n.saturating_sub(1)));
+        }
 
         remove_ids(&cache.0.guild_channels, &cache.0.channels_guild, id);
         remove_ids(&cache.0.guild_roles, &cache.0.roles, id);
