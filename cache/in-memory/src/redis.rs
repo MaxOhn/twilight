@@ -1,6 +1,6 @@
 use super::{
-    CachedEmoji, CachedGuild, ColdStorageCurrentUser, ColdStorageEmoji, ColdStorageMember,
-    ColdStorageRole, ColdStorageTextChannel, ColdStorageUser, Config, GuildItem, InMemoryCache,
+    CachedGuild, ColdStorageCurrentUser, ColdStorageMember, ColdStorageRole,
+    ColdStorageTextChannel, ColdStorageUser, Config, GuildItem, InMemoryCache,
 };
 
 use darkredis::ConnectionPool;
@@ -17,7 +17,7 @@ use twilight_gateway::shard::ResumeSession;
 use twilight_model::{
     channel::GuildChannel,
     guild::Role,
-    id::{ChannelId, EmojiId, GuildId, RoleId, UserId},
+    id::{ChannelId, GuildId, RoleId, UserId},
 };
 
 const STORE_DURATION: u32 = 180; // seconds
@@ -32,8 +32,6 @@ pub struct ColdRebootData {
     pub member_chunks: usize,
     pub channel_chunks: usize,
     pub role_chunks: usize,
-    pub emoji_chunks: usize,
-    pub unavailable_guild_chunks: usize,
 }
 
 impl InMemoryCache {
@@ -75,7 +73,7 @@ impl InMemoryCache {
                         .metrics
                         .channels_guild
                         .store(cache.0.channels_guild.len(), Relaxed);
-                    cache.0.metrics.emojis.store(cache.0.emojis.len(), Relaxed);
+                    // cache.0.metrics.emojis.store(cache.0.emojis.len(), Relaxed);
                     cache.0.metrics.guilds.store(cache.0.guilds.len(), Relaxed);
                     cache
                         .0
@@ -83,11 +81,11 @@ impl InMemoryCache {
                         .members
                         .store(cache.0.members.len(), Relaxed);
                     cache.0.metrics.roles.store(cache.0.roles.len(), Relaxed);
-                    cache
-                        .0
-                        .metrics
-                        .unavailable_guilds
-                        .store(cache.0.unavailable_guilds.len(), Relaxed);
+                    // cache
+                    //     .0
+                    //     .metrics
+                    //     .unavailable_guilds
+                    //     .store(cache.0.unavailable_guilds.len(), Relaxed);
                     cache.0.metrics.users.store(cache.0.users.len(), Relaxed);
                     let end = Instant::now();
                     debug!(
@@ -138,13 +136,6 @@ impl InMemoryCache {
         future::try_join_all(channel_defrosters)
             .await
             .map_err(|e| ("channels", e))?;
-        // --- Emojis ---
-        let emoji_defrosters: Vec<_> = (0..reboot_data.emoji_chunks)
-            .map(|i| self.defrost_emojis(redis, i))
-            .collect();
-        future::try_join_all(emoji_defrosters)
-            .await
-            .map_err(|e| ("emojis", e))?;
         // --- Roles ---
         let role_defrosters: Vec<_> = (0..reboot_data.role_chunks)
             .map(|i| self.defrost_roles(redis, i))
@@ -152,13 +143,6 @@ impl InMemoryCache {
         future::try_join_all(role_defrosters)
             .await
             .map_err(|e| ("roles", e))?;
-        // --- Unavailable guilds ---
-        let unavailable_guilds_defrosters: Vec<_> = (0..reboot_data.unavailable_guild_chunks)
-            .map(|i| self.defrost_unavailable_guilds(redis, i))
-            .collect();
-        future::try_join_all(unavailable_guilds_defrosters)
-            .await
-            .map_err(|e| ("unavailable guilds", e))?;
         // --- CurrentUser ---
         self.defrost_current_user(redis)
             .await
@@ -166,14 +150,12 @@ impl InMemoryCache {
         debug!(
             "Cache defrosting complete:\n\
             {} guilds | {} channels_guild | {} users\n\
-            {} members | {} emojis | {} roles\n\
-            {} guild_channels | {} guild_emojis | {} guilds_members\n\
-            {} guild_roles | {} unavailable_guilds",
+            {} members | {} roles | {} guild_channels\n\
+            {} guild_emojis | {} guilds_members | {} guild_roles",
             self.0.guilds.len(),
             self.0.channels_guild.len(),
             self.0.users.len(),
             self.0.members.len(),
-            self.0.emojis.len(),
             self.0.roles.len(),
             self.0
                 .guild_channels
@@ -195,7 +177,6 @@ impl InMemoryCache {
                 .iter()
                 .map(|guard| guard.value().len())
                 .sum::<usize>(),
-            self.0.unavailable_guilds.len(),
         );
         Ok(())
     }
@@ -294,29 +275,6 @@ impl InMemoryCache {
         Ok(())
     }
 
-    async fn defrost_emojis(
-        &self,
-        redis: &ConnectionPool,
-        index: usize,
-    ) -> Result<(), Box<dyn Error>> {
-        let key = format!("cb_cluster_emoji_chunk_{}", index);
-        let mut connection = redis.get().await;
-        let data = connection.get(&key).await?.unwrap();
-        let emojis: Vec<ColdStorageEmoji> = serde_json::from_slice(&data)?;
-        connection.del(key).await?;
-        debug!("Worker {} found {} emojis to defrost", index, emojis.len());
-        for emoji in emojis {
-            let emoji: GuildItem<CachedEmoji> = emoji.into();
-            self.0
-                .guild_emojis
-                .entry(emoji.guild_id)
-                .or_insert_with(HashSet::new)
-                .insert(emoji.data.id);
-            self.0.emojis.insert(emoji.data.id, emoji);
-        }
-        Ok(())
-    }
-
     async fn defrost_roles(
         &self,
         redis: &ConnectionPool,
@@ -336,27 +294,6 @@ impl InMemoryCache {
                 .or_insert_with(HashSet::new)
                 .insert(role.data.id);
             self.0.roles.insert(role.data.id, role);
-        }
-        Ok(())
-    }
-
-    async fn defrost_unavailable_guilds(
-        &self,
-        redis: &ConnectionPool,
-        index: usize,
-    ) -> Result<(), Box<dyn Error>> {
-        let key = format!("cb_cluster_unavailable_guilds_chunk_{}", index);
-        let mut connection = redis.get().await;
-        let data = connection.get(&key).await?.unwrap();
-        let guilds: Vec<GuildId> = serde_json::from_slice(&data)?;
-        connection.del(key).await?;
-        debug!(
-            "Worker {} found {} unavailable guilds to defrost",
-            index,
-            guilds.len()
-        );
-        for guild in guilds {
-            self.0.unavailable_guilds.insert(guild);
         }
         Ok(())
     }
@@ -447,19 +384,6 @@ impl InMemoryCache {
             .map(|(i, chunk)| self._prepare_cold_resume_channel(redis, chunk, i))
             .collect();
         future::join_all(channel_tasks).await;
-        // --- Emojis ---
-        let emoji_chunks = self.0.emojis.len() / 100_000 + 1;
-        let mut emoji_work_orders = vec![Vec::with_capacity(5_000); emoji_chunks];
-        for (i, guard) in self.0.emojis.iter().enumerate() {
-            emoji_work_orders[i % emoji_chunks].push(*guard.key());
-        }
-        debug!("Freezing {} emojis", self.0.emojis.len());
-        let emoji_tasks: Vec<_> = emoji_work_orders
-            .into_iter()
-            .enumerate()
-            .map(|(i, chunk)| self._prepare_cold_resume_emoji(redis, chunk, i))
-            .collect();
-        future::join_all(emoji_tasks).await;
         // --- Roles ---
         let role_chunks = self.0.roles.len() / 100_000 + 1;
         let mut role_work_orders = vec![Vec::with_capacity(5_000); role_chunks];
@@ -473,28 +397,6 @@ impl InMemoryCache {
             .map(|(i, chunk)| self._prepare_cold_resume_role(redis, chunk, i))
             .collect();
         future::join_all(role_tasks).await;
-        // --- Unavailable guilds ---
-        let unavailable_guild_chunks = if self.0.unavailable_guilds.len() > 0 {
-            let unavailable_guild_chunks = self.0.unavailable_guilds.len() / 100_000 + 1;
-            let mut unavailable_guild_work_orders =
-                vec![Vec::with_capacity(5_000); unavailable_guild_chunks];
-            for (i, guard) in self.0.unavailable_guilds.iter().enumerate() {
-                unavailable_guild_work_orders[i % unavailable_guild_chunks].push(*guard.key());
-            }
-            debug!(
-                "Freezing {} unavailable_guild",
-                self.0.unavailable_guilds.len()
-            );
-            let unavailable_guild_tasks: Vec<_> = unavailable_guild_work_orders
-                .into_iter()
-                .enumerate()
-                .map(|(i, chunk)| self._prepare_cold_resume_unavailable_guild(redis, chunk, i))
-                .collect();
-            future::join_all(unavailable_guild_tasks).await;
-            unavailable_guild_chunks
-        } else {
-            0
-        };
         // --- CurrentUser ---
         debug!("Freezing current user");
         self._prepare_cold_resume_current_user(redis).await;
@@ -514,9 +416,7 @@ impl InMemoryCache {
             user_chunks,
             member_chunks,
             channel_chunks,
-            emoji_chunks,
             role_chunks,
-            unavailable_guild_chunks,
         };
         let mut connection = redis.get().await;
         let data_result = connection
@@ -697,47 +597,6 @@ impl InMemoryCache {
         }
     }
 
-    async fn _prepare_cold_resume_emoji(
-        &self,
-        redis: &ConnectionPool,
-        orders: Vec<EmojiId>,
-        index: usize,
-    ) {
-        debug!(
-            "Guild dumper {} started freezing {} emojis",
-            index,
-            orders.len()
-        );
-        let mut connection = redis.get().await;
-        let to_dump: Vec<_> = orders
-            .into_iter()
-            .filter_map(|key| self.0.emojis.remove(&key))
-            .map(|(_, g)| ColdStorageEmoji {
-                guild_id: g.guild_id,
-                id: g.data.id,
-                animated: g.data.animated,
-                name: g.data.name.to_owned(),
-                require_colons: g.data.require_colons,
-                roles: g.data.roles.to_owned(),
-                available: g.data.available,
-            })
-            .collect();
-        let serialized = serde_json::to_string(&to_dump).unwrap();
-        let dump_task = connection
-            .set_and_expire_seconds(
-                format!("cb_cluster_emoji_chunk_{}", index),
-                serialized,
-                STORE_DURATION,
-            )
-            .await;
-        if let Err(why) = dump_task {
-            debug!(
-                "Error while setting redis' `cb_cluster_emoji_chunk_{}`: {}",
-                index, why
-            );
-        }
-    }
-
     async fn _prepare_cold_resume_role(
         &self,
         redis: &ConnectionPool,
@@ -776,38 +635,6 @@ impl InMemoryCache {
         if let Err(why) = dump_task {
             debug!(
                 "Error while setting redis' `cb_cluster_role_chunk_{}`: {}",
-                index, why
-            );
-        }
-    }
-
-    async fn _prepare_cold_resume_unavailable_guild(
-        &self,
-        redis: &ConnectionPool,
-        orders: Vec<GuildId>,
-        index: usize,
-    ) {
-        debug!(
-            "Guild dumper {} started freezing {} unavailable guilds",
-            index,
-            orders.len()
-        );
-        let mut connection = redis.get().await;
-        let to_dump: Vec<_> = orders
-            .into_iter()
-            .filter_map(|key| self.0.unavailable_guilds.remove(&key))
-            .collect();
-        let serialized = serde_json::to_string(&to_dump).unwrap();
-        let dump_task = connection
-            .set_and_expire_seconds(
-                format!("cb_cluster_unavailable_guilds_chunk_{}", index),
-                serialized,
-                STORE_DURATION,
-            )
-            .await;
-        if let Err(why) = dump_task {
-            debug!(
-                "Error while setting redis' `cb_cluster_unavailable_guilds_chunk_{}`: {}",
                 index, why
             );
         }

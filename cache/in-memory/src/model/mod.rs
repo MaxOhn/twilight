@@ -15,7 +15,7 @@ pub use self::{
 
 pub(crate) use self::{
     cold_current_user::ColdStorageCurrentUser, cold_role::ColdStorageRole,
-    cold_textchannel::ColdStorageTextChannel, cold_user::ColdStorageUser, emoji::ColdStorageEmoji,
+    cold_textchannel::ColdStorageTextChannel, cold_user::ColdStorageUser,
     member::ColdStorageMember,
 };
 
