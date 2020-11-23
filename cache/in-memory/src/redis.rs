@@ -3,12 +3,14 @@ use super::{
     ColdStorageTextChannel, ColdStorageUser, Config, GuildItem, InMemoryCache,
 };
 
-use darkredis::ConnectionPool;
+use darkredis::{ConnectionPool, Error as RedisError};
 use futures::future;
 use serde::{Deserialize, Serialize};
+use serde_json::Error as SerdeError;
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
+    fmt,
     ops::Deref,
     sync::{atomic::Ordering::Relaxed, Arc},
     time::Instant,
@@ -32,6 +34,44 @@ pub struct ColdRebootData {
     pub member_chunks: usize,
     pub channel_chunks: usize,
     pub role_chunks: usize,
+}
+
+pub type DefrostResult<T> = Result<T, DefrostError>;
+
+#[derive(Debug)]
+pub enum DefrostError {
+    Redis(RedisError),
+    Serde(SerdeError),
+}
+
+impl Error for DefrostError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Redis(source) => Some(source),
+            Self::Serde(source) => Some(source),
+        }
+    }
+}
+
+impl fmt::Display for DefrostError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Redis(_) => f.write_str("redis error"),
+            Self::Serde(_) => f.write_str("serde error"),
+        }
+    }
+}
+
+impl From<SerdeError> for DefrostError {
+    fn from(e: SerdeError) -> Self {
+        Self::Serde(e)
+    }
+}
+
+impl From<RedisError> for DefrostError {
+    fn from(e: RedisError) -> Self {
+        Self::Redis(e)
+    }
 }
 
 impl InMemoryCache {
@@ -66,6 +106,9 @@ impl InMemoryCache {
                 let start = Instant::now();
                 if let Err((cause, why)) = cache.restore_cold_resume(redis, cold_cache).await {
                     error!("Cold resume defrosting failed ({}): {}", cause, why);
+                    if let Some(source) = why.source() {
+                        error!(" - caused by: {}", source);
+                    }
                     cache.clear();
                 } else {
                     cache
@@ -107,7 +150,7 @@ impl InMemoryCache {
         &self,
         redis: &ConnectionPool,
         reboot_data: ColdRebootData,
-    ) -> Result<(), (&'static str, Box<dyn Error>)> {
+    ) -> Result<(), (&'static str, DefrostError)> {
         // --- Guilds ---
         let guild_defrosters: Vec<_> = (0..reboot_data.guild_chunks)
             .map(|i| self.defrost_guilds(redis, i))
@@ -181,11 +224,7 @@ impl InMemoryCache {
         Ok(())
     }
 
-    async fn defrost_guilds(
-        &self,
-        redis: &ConnectionPool,
-        index: usize,
-    ) -> Result<(), Box<dyn Error>> {
+    async fn defrost_guilds(&self, redis: &ConnectionPool, index: usize) -> DefrostResult<()> {
         let key = format!("cb_cluster_guild_chunk_{}", index);
         let mut connection = redis.get().await;
         let data = connection.get(&key).await?.unwrap();
@@ -198,11 +237,7 @@ impl InMemoryCache {
         Ok(())
     }
 
-    async fn defrost_users(
-        &self,
-        redis: &ConnectionPool,
-        index: usize,
-    ) -> Result<(), Box<dyn Error>> {
+    async fn defrost_users(&self, redis: &ConnectionPool, index: usize) -> DefrostResult<()> {
         let key = format!("cb_cluster_user_chunk_{}", index);
         let mut connection = redis.get().await;
         let data = connection.get(&key).await?.unwrap();
@@ -216,11 +251,7 @@ impl InMemoryCache {
         Ok(())
     }
 
-    async fn defrost_members(
-        &self,
-        redis: &ConnectionPool,
-        index: usize,
-    ) -> Result<(), Box<dyn Error>> {
+    async fn defrost_members(&self, redis: &ConnectionPool, index: usize) -> DefrostResult<()> {
         let key = format!("cb_cluster_member_chunk_{}", index);
         let mut connection = redis.get().await;
         let data = connection.get(&key).await?.unwrap();
@@ -249,11 +280,7 @@ impl InMemoryCache {
         Ok(())
     }
 
-    async fn defrost_channels(
-        &self,
-        redis: &ConnectionPool,
-        index: usize,
-    ) -> Result<(), Box<dyn Error>> {
+    async fn defrost_channels(&self, redis: &ConnectionPool, index: usize) -> DefrostResult<()> {
         let key = format!("cb_cluster_channel_chunk_{}", index);
         let mut connection = redis.get().await;
         let data = connection.get(&key).await?.unwrap();
@@ -275,11 +302,7 @@ impl InMemoryCache {
         Ok(())
     }
 
-    async fn defrost_roles(
-        &self,
-        redis: &ConnectionPool,
-        index: usize,
-    ) -> Result<(), Box<dyn Error>> {
+    async fn defrost_roles(&self, redis: &ConnectionPool, index: usize) -> DefrostResult<()> {
         let key = format!("cb_cluster_role_chunk_{}", index);
         let mut connection = redis.get().await;
         let data = connection.get(&key).await?.unwrap();
@@ -298,7 +321,7 @@ impl InMemoryCache {
         Ok(())
     }
 
-    async fn defrost_current_user(&self, redis: &ConnectionPool) -> Result<(), Box<dyn Error>> {
+    async fn defrost_current_user(&self, redis: &ConnectionPool) -> DefrostResult<()> {
         let key = "cb_cluster_current_user";
         let mut connection = redis.get().await;
         let data = connection.get(key).await?.unwrap();
@@ -474,7 +497,7 @@ impl InMemoryCache {
         redis: &ConnectionPool,
         chunk: Vec<UserId>,
         index: usize,
-    ) -> Result<(), Box<dyn Error>> {
+    ) {
         debug!("Worker {} freezing {} users", index, chunk.len());
         let mut connection = redis.get().await;
         let users: Vec<_> = chunk
@@ -511,7 +534,6 @@ impl InMemoryCache {
                 index, why
             );
         }
-        Ok(())
     }
 
     async fn _prepare_cold_resume_member(
@@ -641,7 +663,7 @@ impl InMemoryCache {
     }
 
     async fn _prepare_cold_resume_current_user(&self, redis: &ConnectionPool) {
-        if let Some(user) = self.0.current_user.lock().unwrap().deref() {
+        if let Some(user) = self.current_user() {
             let mut connection = redis.get().await;
             let user = ColdStorageCurrentUser {
                 avatar: user.avatar.to_owned(),
