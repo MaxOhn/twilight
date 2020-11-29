@@ -47,6 +47,8 @@
 //! [license link]: https://github.com/twilight-rs/twilight/blob/trunk/LICENSE.md
 //! [rust badge]: https://img.shields.io/badge/rust-stable-93450a.svg?style=for-the-badge&logo=rust
 
+#![deny(rust_2018_idioms, unused, warnings)]
+
 #[macro_use]
 extern crate log;
 
@@ -143,6 +145,11 @@ struct InMemoryCacheRef {
 ///
 /// Events will only be processed if they are properly expressed with
 /// [`Intents`]; refer to function-level documentation for more details.
+///
+/// # Cloning
+///
+/// The cache internally wraps its data within an Arc. This means that the cache
+/// can be cloned and passed around tasks and threads cheaply.
 ///
 /// # Design and Performance
 ///
@@ -742,7 +749,7 @@ impl InMemoryCache {
         }
     }
 
-    fn cache_user(&self, user: Cow<User>, guild_id: Option<GuildId>) -> Arc<User> {
+    fn cache_user(&self, user: Cow<'_, User>, guild_id: Option<GuildId>) -> Arc<User> {
         match self.0.users.get_mut(&user.id) {
             Some(mut u) if *u.0 == *user => {
                 if let Some(guild_id) = guild_id {

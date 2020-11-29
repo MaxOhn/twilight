@@ -840,6 +840,8 @@ mod tests {
             pinned: false,
             reactions: Vec::new(),
             reference: None,
+            stickers: Vec::new(),
+            referenced_message: None,
             timestamp: String::new(),
             tts: false,
             webhook_id: None,

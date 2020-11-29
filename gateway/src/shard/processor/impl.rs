@@ -412,7 +412,7 @@ impl ShardProcessor {
                 return Ok(());
             }
 
-            let seq = seq.ok_or_else(|| ProcessError::SequenceMissing)?;
+            let seq = seq.ok_or(ProcessError::SequenceMissing)?;
 
             if event_type.as_deref() == Some("RESUMED") {
                 self.process_resumed(seq);
@@ -741,7 +741,7 @@ impl ShardProcessor {
         self.session.set_stage(Stage::Identifying);
 
         let identify = Identify::new(IdentifyInfo {
-            compression: false,
+            compress: false,
             large_threshold: self.config.large_threshold(),
             intents: self.config.intents(),
             properties: self.properties.clone(),

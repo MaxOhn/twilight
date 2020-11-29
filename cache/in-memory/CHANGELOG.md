@@ -2,6 +2,20 @@
 
 Changelog for `twilight-cache-inmemory`.
 
+## [0.2.3] - 2020-11-29
+
+### Misc.
+
+Use the renamed
+`twilight_model::gateway::payload::identify::IdentityInfo::compress` model
+field ([#624] - [@chamburr]).
+
+## [0.2.2] - 2020-11-20
+
+### Enhancements
+
+Don't create useless HashSets in internal functions ([#591] - [@MaxOhn]).
+
 ## [0.2.1] - 2020-11-11
 
 ## Additions
@@ -75,12 +89,15 @@ The crate now depends on version 0.2 of `twilight-model`.
 
 Initial release.
 
+[@chamburr]: https://github.com/chamburr
 [@DusterTheFirst]: https://github.com/DusterTheFirst
 [@Erk-]: https://github.com/Erk-
 [@MaxOhn]: https://github.com/MaxOhn
 [@nickelc]: https://github.com/nickelc
 [@vivian]: https://github.com/vivian
 
+[#624]: https://github.com/twilight-rs/twilight/pull/624
+[#591]: https://github.com/twilight-rs/twilight/pull/591
 [#590]: https://github.com/twilight-rs/twilight/pull/590
 [#576]: https://github.com/twilight-rs/twilight/pull/576
 [#557]: https://github.com/twilight-rs/twilight/pull/557
@@ -90,6 +107,8 @@ Initial release.
 [#532]: https://github.com/twilight-rs/twilight/pull/532
 [#528]: https://github.com/twilight-rs/twilight/pull/528
 
+[0.2.3]: https://github.com/twilight-rs/twilight/releases/tag/cache-in-memory-v0.2.3
+[0.2.2]: https://github.com/twilight-rs/twilight/releases/tag/cache-in-memory-v0.2.2
 [0.2.1]: https://github.com/twilight-rs/twilight/releases/tag/cache-in-memory-v0.2.1
 [0.2.0]: https://github.com/twilight-rs/twilight/releases/tag/cache-in-memory-v0.2.0
 [0.2.0-beta.2]: https://github.com/twilight-rs/twilight/releases/tag/cache-in-memory-v0.2.0-beta.2

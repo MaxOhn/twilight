@@ -54,7 +54,7 @@ impl Error for DefrostError {
 }
 
 impl fmt::Display for DefrostError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Redis(_) => f.write_str("redis error"),
             Self::Serde(_) => f.write_str("serde error"),
