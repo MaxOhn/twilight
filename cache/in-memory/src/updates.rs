@@ -1,4 +1,4 @@
-use super::{config::EventType, InMemoryCache};
+use super::{config::ResourceType, InMemoryCache};
 
 use dashmap::{mapref::entry::Entry, DashMap};
 use std::{
@@ -8,15 +8,11 @@ use std::{
     sync::{atomic::Ordering::Relaxed, Arc},
 };
 use twilight_model::{
-    channel::{message::MessageReaction, Channel},
+    channel::{message::MessageReaction, Channel, ReactionType},
     gateway::{event::Event, payload::*},
     guild::GuildStatus,
     id::GuildId,
 };
-
-fn guard(this: &InMemoryCache, event_type: EventType) -> bool {
-    this.0.config.event_types().contains(event_type)
-}
 
 pub trait UpdateCache {
     // Allow this for presentation purposes in documentation.
@@ -62,7 +58,7 @@ impl UpdateCache for Event {
             ReactionAdd(v) => c.update(v.deref()),
             ReactionRemove(v) => c.update(v.deref()),
             ReactionRemoveAll(v) => c.update(v),
-            ReactionRemoveEmoji(_) => {}
+            ReactionRemoveEmoji(v) => c.update(v),
             Ready(v) => c.update(v.deref()),
             Resumed => {}
             RoleCreate(v) => c.update(v),
@@ -87,7 +83,7 @@ impl UpdateCache for Event {
 
 impl UpdateCache for ChannelCreate {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::CHANNEL_CREATE) {
+        if !cache.wants(ResourceType::CHANNEL) {
             return;
         }
 
@@ -120,7 +116,7 @@ impl UpdateCache for ChannelCreate {
 
 impl UpdateCache for ChannelDelete {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::CHANNEL_DELETE) {
+        if !cache.wants(ResourceType::CHANNEL) {
             return;
         }
 
@@ -142,7 +138,7 @@ impl UpdateCache for ChannelDelete {
 
 impl UpdateCache for ChannelUpdate {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::CHANNEL_UPDATE) {
+        if !cache.wants(ResourceType::CHANNEL) {
             return;
         }
 
@@ -164,7 +160,7 @@ impl UpdateCache for ChannelUpdate {
 
 impl UpdateCache for GuildCreate {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::GUILD_CREATE) {
+        if !cache.wants(ResourceType::GUILD) {
             return;
         }
 
@@ -186,7 +182,7 @@ impl UpdateCache for GuildDelete {
             }
         }
 
-        if !guard(cache, EventType::GUILD_DELETE) {
+        if !cache.wants(ResourceType::GUILD) {
             return;
         }
 
@@ -211,17 +207,31 @@ impl UpdateCache for GuildDelete {
         remove_ids(&cache.0.guild_channels, &cache.0.channels_guild, id);
         remove_ids(&cache.0.guild_roles, &cache.0.roles, id);
 
-        if let Some((_, ids)) = cache.0.guild_members.remove(&id) {
-            for user_id in ids {
-                cache.0.members.remove(&(id, user_id));
+        if cache.wants(ResourceType::MEMBER) {
+            if let Some((_, ids)) = cache.0.guild_members.remove(&id) {
+                for user_id in ids {
+                    cache.0.members.remove(&(id, user_id));
+                }
             }
         }
     }
 }
 
+impl UpdateCache for GuildEmojisUpdate {
+    fn update(&self, cache: &InMemoryCache) {
+        if !cache.wants(ResourceType::EMOJI) {
+            return;
+        }
+
+        cache.cache_emojis(self.guild_id, self.emojis.clone());
+    }
+}
+
+impl UpdateCache for GuildIntegrationsUpdate {}
+
 impl UpdateCache for GuildUpdate {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::GUILD_UPDATE) {
+        if !cache.wants(ResourceType::GUILD) {
             return;
         }
 
@@ -239,7 +249,7 @@ impl UpdateCache for GuildUpdate {
 
 impl UpdateCache for MemberAdd {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::MEMBER_ADD) {
+        if !cache.wants(ResourceType::MEMBER) {
             return;
         }
 
@@ -256,7 +266,7 @@ impl UpdateCache for MemberAdd {
 
 impl UpdateCache for MemberChunk {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::MEMBER_CHUNK) {
+        if !cache.wants(ResourceType::MEMBER) {
             return;
         }
 
@@ -264,15 +274,15 @@ impl UpdateCache for MemberChunk {
             return;
         }
 
-        cache.cache_members(self.guild_id, self.members.values().cloned());
+        cache.cache_members(self.guild_id, self.members.clone());
         let mut guild = cache.0.guild_members.entry(self.guild_id).or_default();
-        guild.extend(self.members.keys());
+        guild.extend(self.members.iter().map(|member| member.user.id));
     }
 }
 
 impl UpdateCache for MemberRemove {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::MEMBER_REMOVE) {
+        if !cache.wants(ResourceType::MEMBER) {
             return;
         }
 
@@ -303,7 +313,7 @@ impl UpdateCache for MemberRemove {
 
 impl UpdateCache for MemberUpdate {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::MEMBER_UPDATE) {
+        if !cache.wants(ResourceType::MEMBER) {
             return;
         }
 
@@ -320,7 +330,7 @@ impl UpdateCache for MemberUpdate {
 
 impl UpdateCache for MessageCreate {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::MESSAGE_CREATE) {
+        if !cache.wants(ResourceType::MESSAGE) {
             return;
         }
 
@@ -366,7 +376,7 @@ impl UpdateCache for MessageCreate {
 
 impl UpdateCache for MessageDelete {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::MESSAGE_DELETE) {
+        if !cache.wants(ResourceType::MESSAGE) {
             return;
         }
 
@@ -383,7 +393,7 @@ impl UpdateCache for MessageDelete {
 
 impl UpdateCache for MessageDeleteBulk {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::MESSAGE_DELETE_BULK) {
+        if !cache.wants(ResourceType::MESSAGE) {
             return;
         }
 
@@ -403,7 +413,7 @@ impl UpdateCache for MessageDeleteBulk {
 
 impl UpdateCache for MessageUpdate {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::MESSAGE_UPDATE) {
+        if !cache.wants(ResourceType::MESSAGE) {
             return;
         }
 
@@ -449,7 +459,7 @@ impl UpdateCache for MessageUpdate {
 
 impl UpdateCache for ReactionAdd {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::REACTION_ADD) {
+        if !cache.wants(ResourceType::REACTION) {
             return;
         }
 
@@ -489,7 +499,7 @@ impl UpdateCache for ReactionAdd {
 
 impl UpdateCache for ReactionRemove {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::REACTION_REMOVE) {
+        if !cache.wants(ResourceType::REACTION) {
             return;
         }
 
@@ -522,7 +532,7 @@ impl UpdateCache for ReactionRemove {
 
 impl UpdateCache for ReactionRemoveAll {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::REACTION_REMOVE_ALL) {
+        if !cache.wants(ResourceType::REACTION) {
             return;
         }
 
@@ -538,21 +548,49 @@ impl UpdateCache for ReactionRemoveAll {
     }
 }
 
-impl UpdateCache for Ready {
+impl UpdateCache for ReactionRemoveEmoji {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::READY) {
+        if !cache.wants(ResourceType::REACTION) {
             return;
         }
 
-        cache.cache_current_user(self.user.clone());
+        let mut channel = cache.0.messages.entry(self.channel_id).or_default();
 
-        for status in self.guilds.values() {
-            match status {
-                GuildStatus::Offline(u) => {
-                    cache.unavailable_guild(u.id);
-                }
-                GuildStatus::Online(g) => {
-                    cache.cache_guild(g.clone());
+        let mut message = match channel.iter_mut().find(|msg| msg.id == self.message_id) {
+            Some(message) => message,
+            None => return,
+        };
+
+        let index = message.reactions.iter().position(|r| {
+            matches!(&r.emoji,
+                ReactionType::Unicode { name, .. }
+                    | ReactionType::Custom { name: Some(name), .. }
+                    if *name == self.emoji.name
+            )
+        });
+
+        if let Some(index) = index {
+            let msg = Arc::make_mut(&mut message);
+            msg.reactions.remove(index);
+        }
+    }
+}
+
+impl UpdateCache for Ready {
+    fn update(&self, cache: &InMemoryCache) {
+        if cache.wants(ResourceType::USER_CURRENT) {
+            cache.cache_current_user(self.user.clone());
+        }
+
+        if cache.wants(ResourceType::GUILD) {
+            for status in &self.guilds {
+                match status {
+                    GuildStatus::Offline(u) => {
+                        cache.unavailable_guild(u.id);
+                    }
+                    GuildStatus::Online(g) => {
+                        cache.cache_guild(g.clone());
+                    }
                 }
             }
         }
@@ -561,7 +599,7 @@ impl UpdateCache for Ready {
 
 impl UpdateCache for RoleCreate {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::ROLE_CREATE) {
+        if !cache.wants(ResourceType::ROLE) {
             return;
         }
 
@@ -576,7 +614,7 @@ impl UpdateCache for RoleCreate {
 
 impl UpdateCache for RoleDelete {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::ROLE_DELETE) {
+        if !cache.wants(ResourceType::ROLE) {
             return;
         }
 
@@ -586,7 +624,7 @@ impl UpdateCache for RoleDelete {
 
 impl UpdateCache for RoleUpdate {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::ROLE_UPDATE) {
+        if !cache.wants(ResourceType::ROLE) {
             return;
         }
 
@@ -596,7 +634,7 @@ impl UpdateCache for RoleUpdate {
 
 impl UpdateCache for UnavailableGuild {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::UNAVAILABLE_GUILD) {
+        if !cache.wants(ResourceType::GUILD) {
             return;
         }
 
@@ -606,7 +644,7 @@ impl UpdateCache for UnavailableGuild {
 
 impl UpdateCache for UserUpdate {
     fn update(&self, cache: &InMemoryCache) {
-        if !guard(cache, EventType::USER_UPDATE) {
+        if !cache.wants(ResourceType::USER_CURRENT) {
             return;
         }
 
@@ -614,23 +652,24 @@ impl UpdateCache for UserUpdate {
     }
 }
 
+impl UpdateCache for WebhooksUpdate {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::EventType;
-    use std::collections::HashMap;
+    use crate::config::ResourceType;
     use twilight_model::{
-        channel::{ChannelType, GuildChannel, TextChannel},
-        gateway::payload::ChannelDelete,
-        guild::DefaultMessageNotificationLevel,
-        guild::ExplicitContentFilter,
-        guild::Guild,
-        guild::MfaLevel,
-        guild::PartialGuild,
-        guild::PremiumTier,
-        guild::SystemChannelFlags,
-        guild::VerificationLevel,
-        id::{ChannelId, GuildId, UserId},
+        channel::{
+            message::{MessageFlags, MessageType},
+            ChannelType, GuildChannel, Message, Reaction, TextChannel,
+        },
+        gateway::payload::{reaction_remove_emoji::PartialEmoji, ChannelDelete},
+        guild::{
+            DefaultMessageNotificationLevel, ExplicitContentFilter, Guild, Member, MfaLevel,
+            PartialGuild, PartialMember, PremiumTier, SystemChannelFlags, VerificationLevel,
+        },
+        id::{ChannelId, GuildId, MessageId, UserId},
+        user::User,
     };
 
     fn guild_channel_text() -> (GuildId, ChannelId, GuildChannel) {
@@ -654,6 +693,135 @@ mod tests {
         (guild_id, channel_id, channel)
     }
 
+    fn cache_with_message_and_reactions() -> InMemoryCache {
+        let cache = InMemoryCache::new();
+
+        let msg = Message {
+            activity: None,
+            application: None,
+            attachments: Vec::new(),
+            author: User {
+                avatar: Some("".to_owned()),
+                bot: false,
+                discriminator: "0001".to_owned(),
+                email: None,
+                flags: None,
+                id: UserId(3),
+                locale: None,
+                mfa_enabled: None,
+                name: "test".to_owned(),
+                premium_type: None,
+                public_flags: None,
+                system: None,
+                verified: None,
+            },
+            channel_id: ChannelId(2),
+            content: "ping".to_owned(),
+            edited_timestamp: None,
+            embeds: Vec::new(),
+            flags: Some(MessageFlags::empty()),
+            guild_id: Some(GuildId(1)),
+            id: MessageId(4),
+            kind: MessageType::Regular,
+            member: Some(PartialMember {
+                deaf: false,
+                joined_at: None,
+                mute: false,
+                nick: Some("member nick".to_owned()),
+                premium_since: None,
+                roles: Vec::new(),
+            }),
+            mention_channels: Vec::new(),
+            mention_everyone: false,
+            mention_roles: Vec::new(),
+            mentions: Vec::new(),
+            pinned: false,
+            reactions: Vec::new(),
+            reference: None,
+            stickers: Vec::new(),
+            referenced_message: None,
+            timestamp: String::new(),
+            tts: false,
+            webhook_id: None,
+        };
+
+        cache.update(&MessageCreate(msg));
+
+        let mut reaction = ReactionAdd(Reaction {
+            channel_id: ChannelId(2),
+            emoji: ReactionType::Unicode {
+                name: "😀".to_owned(),
+            },
+            guild_id: Some(GuildId(1)),
+            member: Some(Member {
+                deaf: false,
+                guild_id: GuildId(1),
+                hoisted_role: None,
+                joined_at: None,
+                mute: false,
+                nick: Some("member nick".to_owned()),
+                premium_since: None,
+                roles: Vec::new(),
+                user: User {
+                    avatar: Some("".to_owned()),
+                    bot: false,
+                    discriminator: "0001".to_owned(),
+                    email: None,
+                    flags: None,
+                    id: UserId(3),
+                    locale: None,
+                    mfa_enabled: None,
+                    name: "test".to_owned(),
+                    premium_type: None,
+                    public_flags: None,
+                    system: None,
+                    verified: None,
+                },
+            }),
+            message_id: MessageId(4),
+            user_id: UserId(3),
+        });
+
+        cache.update(&reaction);
+
+        reaction.member.replace(Member {
+            deaf: false,
+            guild_id: GuildId(1),
+            hoisted_role: None,
+            joined_at: None,
+            mute: false,
+            nick: None,
+            premium_since: None,
+            roles: Vec::new(),
+            user: User {
+                avatar: Some("".to_owned()),
+                bot: false,
+                discriminator: "0002".to_owned(),
+                email: None,
+                flags: None,
+                id: UserId(5),
+                locale: None,
+                mfa_enabled: None,
+                name: "test".to_owned(),
+                premium_type: None,
+                public_flags: None,
+                system: None,
+                verified: None,
+            },
+        });
+        reaction.user_id = UserId(5);
+
+        cache.update(&reaction);
+
+        reaction.emoji = ReactionType::Unicode {
+            name: "🗺️".to_owned(),
+        };
+
+        cache.update(&reaction);
+
+        cache
+    }
+
     #[test]
     fn test_guild_update() {
         let cache = InMemoryCache::new();
@@ -664,11 +832,11 @@ mod tests {
             approximate_member_count: None,
             approximate_presence_count: None,
             banner: None,
-            channels: HashMap::new(),
+            channels: Vec::new(),
             default_message_notifications: DefaultMessageNotificationLevel::Mentions,
             description: None,
             discovery_splash: None,
-            emojis: HashMap::new(),
+            emojis: Vec::new(),
             explicit_content_filter: ExplicitContentFilter::None,
             features: Vec::new(),
             icon: None,
@@ -680,7 +848,7 @@ mod tests {
             max_presences: None,
             max_video_channel_users: None,
             member_count: None,
-            members: HashMap::new(),
+            members: Vec::new(),
             mfa_level: MfaLevel::None,
             name: "test".to_owned(),
             owner_id: UserId(1),
@@ -689,9 +857,9 @@ mod tests {
             preferred_locale: "en_us".to_owned(),
             premium_subscription_count: None,
             premium_tier: PremiumTier::None,
-            presences: HashMap::new(),
+            presences: Vec::new(),
             region: "us".to_owned(),
-            roles: HashMap::new(),
+            roles: Vec::new(),
             rules_channel_id: None,
             splash: None,
             system_channel_flags: SystemChannelFlags::empty(),
@@ -699,7 +867,7 @@ mod tests {
             unavailable: false,
             vanity_url_code: None,
             verification_level: VerificationLevel::VeryHigh,
-            voice_states: HashMap::new(),
+            voice_states: Vec::new(),
             widget_channel_id: None,
             widget_enabled: None,
         };
@@ -785,18 +953,8 @@ mod tests {
 
     #[test]
     fn test_message_create() {
-        use twilight_model::{
-            channel::{
-                message::{MessageFlags, MessageType},
-                Message,
-            },
-            guild::PartialMember,
-            id::MessageId,
-            user::User,
-        };
-
         let cache = InMemoryCache::builder()
-            .event_types(EventType::MESSAGE_CREATE)
+            .resource_types(ResourceType::MESSAGE)
             .message_cache_size(1)
             .build();
         let msg = Message {
@@ -831,12 +989,13 @@ mod tests {
                 joined_at: None,
                 mute: false,
                 nick: Some("member nick".to_owned()),
+                premium_since: None,
                 roles: Vec::new(),
             }),
             mention_channels: Vec::new(),
             mention_everyone: false,
             mention_roles: Vec::new(),
-            mentions: HashMap::new(),
+            mentions: Vec::new(),
             pinned: false,
             reactions: Vec::new(),
             reference: None,
@@ -861,5 +1020,136 @@ mod tests {
             let entry = cache.0.messages.get(&ChannelId(2)).unwrap();
             assert_eq!(entry.value().len(), 1);
         }
+    }
+
+    #[test]
+    fn test_reaction_add() {
+        let cache = cache_with_message_and_reactions();
+
+        let msg = cache
+            .message_extract(ChannelId(2), |msg| {
+                if msg.id == MessageId(4) {
+                    Some(msg.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        assert_eq!(msg.reactions.len(), 2);
+
+        let world_react = msg
+            .reactions
+            .iter()
+            .find(|&r| matches!(&r.emoji, ReactionType::Unicode {name} if name == "🗺️"));
+        let smiley_react = msg
+            .reactions
+            .iter()
+            .find(|&r| matches!(&r.emoji, ReactionType::Unicode {name} if name == "😀"));
+
+        assert!(world_react.is_some());
+        assert_eq!(world_react.unwrap().count, 1);
+        assert!(smiley_react.is_some());
+        assert_eq!(smiley_react.unwrap().count, 2);
+    }
+
+    #[test]
+    fn test_reaction_remove() {
+        let cache = cache_with_message_and_reactions();
+        cache.update(&ReactionRemove(Reaction {
+            channel_id: ChannelId(2),
+            emoji: ReactionType::Unicode {
+                name: "😀".to_owned(),
+            },
+            guild_id: Some(GuildId(1)),
+            member: None,
+            message_id: MessageId(4),
+            user_id: UserId(5),
+        }));
+
+        let msg = cache
+            .message_extract(ChannelId(2), |msg| {
+                if msg.id == MessageId(4) {
+                    Some(msg.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        assert_eq!(msg.reactions.len(), 2);
+
+        let world_react = msg
+            .reactions
+            .iter()
+            .find(|&r| matches!(&r.emoji, ReactionType::Unicode {name} if name == "🗺️"));
+        let smiley_react = msg
+            .reactions
+            .iter()
+            .find(|&r| matches!(&r.emoji, ReactionType::Unicode {name} if name == "😀"));
+
+        assert!(world_react.is_some());
+        assert_eq!(world_react.unwrap().count, 1);
+        assert!(smiley_react.is_some());
+        assert_eq!(smiley_react.unwrap().count, 1);
+    }
+
+    #[test]
+    fn test_reaction_remove_emoji() {
+        let cache = cache_with_message_and_reactions();
+        cache.update(&ReactionRemoveEmoji {
+            channel_id: ChannelId(2),
+            emoji: PartialEmoji {
+                id: None,
+                name: "😀".to_owned(),
+            },
+            guild_id: GuildId(1),
+            message_id: MessageId(4),
+        });
+
+        let reactions = cache
+            .message_extract(ChannelId(2), |msg| {
+                if msg.id == MessageId(4) {
+                    Some(msg.reactions.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        assert_eq!(reactions.len(), 1);
+
+        let world_react = reactions
+            .iter()
+            .find(|&r| matches!(&r.emoji, ReactionType::Unicode {name} if name == "🗺️"));
+        let smiley_react = reactions
+            .iter()
+            .find(|&r| matches!(&r.emoji, ReactionType::Unicode {name} if name == "😀"));
+
+        assert!(world_react.is_some());
+        assert_eq!(world_react.unwrap().count, 1);
+        assert!(smiley_react.is_none());
+    }
+
+    #[test]
+    fn test_reaction_remove_all() {
+        let cache = cache_with_message_and_reactions();
+        cache.update(&ReactionRemoveAll {
+            channel_id: ChannelId(2),
+            message_id: MessageId(4),
+            guild_id: Some(GuildId(1)),
+        });
+
+        let reaction_len = cache
+            .message_extract(ChannelId(2), |msg| {
+                if msg.id == MessageId(4) {
+                    Some(msg.reactions.len())
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        assert_eq!(reaction_len, 0);
     }
 }

@@ -40,6 +40,7 @@ impl Into<GuildItem<Role>> for ColdStorageRole {
             name: self.name,
             permissions: self.permissions,
             position: self.position,
+            tags: None,
         };
         GuildItem {
             data: Arc::new(role),

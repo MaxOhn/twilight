@@ -2,6 +2,60 @@
 
 Changelog for `twilight-cache-inmemory`.
 
+## [0.3.0] - 2021-01-08
+
+### Upgrade Path
+
+Instead of specifying individual events to process via `config::EventType`,
+specify individual resources to process. For example, previously enabling the
+`EventType::MESSAGE_CREATE` and `EventType::MESSAGE_DELETE` event types were
+intended to cache the messages, members, and users within these message events.
+Now `ResourceType::MESSAGE` can be specified to cache the messages from all
+message events, but not the users and members. This avoids an inconsistent cache
+and not enabling all of a grouping of an event type was typically an error.
+
+### Changes
+
+Replace `config::EventType` with a simpler and less error prone
+`config::ResourceType` ([#660] - [@vivian]).
+
+[#660]: https://github.com/twilight-rs/twilight/pull/660
+
+## [0.2.6] - 2021-01-05
+
+### Fixes
+
+Update cached message's reactions when a Reaction Remove Emoji event is
+processed ([#652] - [@sam-kirby]).
+
+### Enhancements
+
+Upgrade `dashmap` from version 3 to 4.0 ([#666] - [@vivian]).
+
+[#666]: https://github.com/twilight-rs/twilight/pull/666
+[#652]: https://github.com/twilight-rs/twilight/pull/652
+
+## [0.2.5] - 2020-12-30
+
+### Additions
+
+Cache members from voice state updates ([#651] - [@sam-kirby]).
+
+[#651]: https://github.com/twilight-rs/twilight/pull/651
+
+## [0.2.4] - 2020-12-18
+
+The MSRV is now set to Rust 1.48.
+
+### Fixes
+
+Update `InMemoryCache::clear` to actually clear all fields, as it was only
+clearing some ([#639] - [@vivian]).
+
+### Misc.
+
+Replace documentation links with intra-doc links ([#524] - [@nickelc]).
+
 ## [0.2.3] - 2020-11-29
 
 ### Misc.
@@ -94,8 +148,10 @@ Initial release.
 [@Erk-]: https://github.com/Erk-
 [@MaxOhn]: https://github.com/MaxOhn
 [@nickelc]: https://github.com/nickelc
+[@sam-kirby]: https://github.com/sam-kirby
 [@vivian]: https://github.com/vivian
 
+[#639]: https://github.com/twilight-rs/twilight/pull/639
 [#624]: https://github.com/twilight-rs/twilight/pull/624
 [#591]: https://github.com/twilight-rs/twilight/pull/591
 [#590]: https://github.com/twilight-rs/twilight/pull/590
@@ -106,7 +162,12 @@ Initial release.
 [#540]: https://github.com/twilight-rs/twilight/pull/540
 [#532]: https://github.com/twilight-rs/twilight/pull/532
 [#528]: https://github.com/twilight-rs/twilight/pull/528
+[#524]: https://github.com/twilight-rs/twilight/pull/524
 
+[0.3.0]: https://github.com/twilight-rs/twilight/releases/tag/cache-in-memory-v0.3.0
+[0.2.6]: https://github.com/twilight-rs/twilight/releases/tag/cache-in-memory-v0.2.6
+[0.2.5]: https://github.com/twilight-rs/twilight/releases/tag/cache-in-memory-v0.2.5
+[0.2.4]: https://github.com/twilight-rs/twilight/releases/tag/cache-in-memory-v0.2.4
 [0.2.3]: https://github.com/twilight-rs/twilight/releases/tag/cache-in-memory-v0.2.3
 [0.2.2]: https://github.com/twilight-rs/twilight/releases/tag/cache-in-memory-v0.2.2
 [0.2.1]: https://github.com/twilight-rs/twilight/releases/tag/cache-in-memory-v0.2.1

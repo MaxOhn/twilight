@@ -2,6 +2,113 @@
 
 Changelog for `twilight-model`.
 
+## [0.3.1] - 2021-01-11
+
+### Additions
+
+Add the `proxy_url` field to `EmbedVideo` ([#767] - [@7596ff]).
+
+[#676]: https://github.com/twilight-rs/twilight/pull/676
+
+## [0.3.0] - 2021-01-08
+
+### Upgrade Path
+
+`channel::Message::mentions` now contains `channel::message::Mention`s instead
+of `User`s, which is like a `User` but with an additional partial `member` field
+([#609] - [@vivian]).
+
+The following fields are now Vecs instead of HashMaps:
+
+- `channel::Message::mentions`
+- `gateway::payload::GuildEmojisUpdate::emojis`
+- `gateway::payload::MemberChunk::members`
+- `gateway::payload::MemberChunk::presences`
+- `gateway::payload::Ready::guilds`
+- `guild::Guild::channels`
+- `guild::Guild::emojis`
+- `guild::Guild::members`
+- `guild::Guild::presences`
+- `guild::Guild::roles`
+- `guild::Guild::voice_states`
+- `guild::PartialGuild::emojis`
+- `guild::PartialGuild::roles`
+- `user::Connection::integrations`
+
+([#659] - [@vivian]).
+
+### Additions
+
+`guild::PartialMember` now contains an optional `premium_since` field
+([#609] - [@vivian]).
+
+`guild::audit_log::AuditLogChangeKey` contains new variants:
+
+- `EnableEmoticons`
+- `ExpireBehavior`
+- `ExpireGracePeriod`
+- `RateLimitPerUser`
+- `SystemChannelId`
+
+([#663] - [@jazevedo620]).
+
+### Changes
+
+`channel::Message`'s `mentions` now contains a sequence of `Mention`s, which are
+users with partial member information in them when available
+([#609] - [@vivian]).
+
+`guild::audit_log::AuditLogChangeKey` is now non-exhaustive
+([#663] - [@jazevedo620]).
+
+[#663]: https://github.com/twilight-rs/twilight/pull/663
+[#659]: https://github.com/twilight-rs/twilight/pull/659
+[#609]: https://github.com/twilight-rs/twilight/pull/609
+
+## [0.2.8] - 2021-01-05
+
+### Fixes
+
+Skip serializing fields when the source field is undefined when None
+([#641] - [@chamburr]).
+
+Make the `AuditLog` fields public ([#662] - [@jazevedo620]).
+
+[#662]: https://github.com/twilight-rs/twilight/pull/662
+[#641]: https://github.com/twilight-rs/twilight/pull/641
+
+## [0.2.7] - 2020-12-30
+
+### Fixes
+
+Add a `serde` `Visitor::visit_unit` implementation for `RoleTags` to fix
+deserialization with `simd-json` ([#648] - [@vivian]).
+
+[#648]: https://github.com/twilight-rs/twilight/pull/648
+
+## [0.2.6] - 2020-12-19
+
+### Additions
+
+Support [Role Tags] ([#638] - [@vivian]).
+
+[#638]: https://github.com/twilight-rs/twilight/pull/638
+[Role Tags]: https://github.com/discord/discord-api-docs/commit/7113ceebd549cdf62f286ee57d4ea69af21031e5
+
+## [0.2.5] - 2020-12-18
+
+The MSRV is now set to Rust 1.48.
+
+### Enhancements
+
+The `request::user::get_current_user_guilds::CurrentUserGuild` type has been
+moved to `twilight_model::user::CurrentUserGuild`. A re-export has been left
+in its place ([#625] - [@AsianIntel]).
+
+### Misc.
+
+Replace documentation links with intra-doc links ([#524] - [@nickelc]).
+
 ## [0.2.4] - 2020-11-29
 
 ### Additions
@@ -177,14 +284,19 @@ Similarly, the following permissions fields now (de)serialize to/from
 
 Initial release.
 
+[@7596ff]: https://github.com/7596ff
+[@AsianIntel]: https://github.com/AsianIntel
 [@chamburr]: https://github.com/chamburr
 [@coadler]: https://github.com/coadler
 [@DusterTheFirst]: https://github.com/DusterTheFirst
 [@Erk-]: https://github.com/Erk-
 [@Gelbpunkt]: https://github.com/Gelbpunkt
+[@jazevedo620]: https://github.com/jazevedo620
+[@nickelc]: https://github.com/nickelc
 [@sam-kirby]: https://github.com/sam-kirby
 [@vivian]: https://github.com/vivian
 
+[#625]: https://github.com/twilight-rs/twilight/pull/625
 [#624]: https://github.com/twilight-rs/twilight/pull/624
 [#622]: https://github.com/twilight-rs/twilight/pull/622
 [#614]: https://github.com/twilight-rs/twilight/pull/614
@@ -200,12 +312,18 @@ Initial release.
 [#549]: https://github.com/twilight-rs/twilight/pull/549
 [#532]: https://github.com/twilight-rs/twilight/pull/532
 [#526]: https://github.com/twilight-rs/twilight/pull/526
+[#524]: https://github.com/twilight-rs/twilight/pull/524
 [#511]: https://github.com/twilight-rs/twilight/pull/511
 [#509]: https://github.com/twilight-rs/twilight/pull/509
 [#499]: https://github.com/twilight-rs/twilight/pull/499
 
 [0.2.0-beta.1:app integrations]: https://github.com/discord/discord-api-docs/commit/a926694e2f8605848bda6b57d21c8817559e5cec
 
+[0.3.0]: https://github.com/twilight-rs/twilight/releases/tag/model-v0.3.0
+[0.2.8]: https://github.com/twilight-rs/twilight/releases/tag/model-v0.2.8
+[0.2.7]: https://github.com/twilight-rs/twilight/releases/tag/model-v0.2.7
+[0.2.6]: https://github.com/twilight-rs/twilight/releases/tag/model-v0.2.6
+[0.2.5]: https://github.com/twilight-rs/twilight/releases/tag/model-v0.2.5
 [0.2.4]: https://github.com/twilight-rs/twilight/releases/tag/model-v0.2.4
 [0.2.3]: https://github.com/twilight-rs/twilight/releases/tag/model-v0.2.3
 [0.2.2]: https://github.com/twilight-rs/twilight/releases/tag/model-v0.2.2

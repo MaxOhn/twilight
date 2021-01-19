@@ -18,16 +18,16 @@ functionality. Please use the individual crates listed below instead!
 
 ## Installation
 
-Twilight requires the latest stable Rust version.
+Twilight supports a MSRV of Rust 1.48+.
 
 We recommend that most users start out with these crates added to your
 `Cargo.toml`'s `[dependencies]` section:
 
 ```toml
-twilight-cache-inmemory = "0.2"
-twilight-gateway = "0.2"
-twilight-http = "0.2"
-twilight-model = "0.2"
+twilight-cache-inmemory = "0.3"
+twilight-gateway = "0.3"
+twilight-http = "0.3"
+twilight-model = "0.3"
 ```
 
 If you need any other functionality that Twilight provides, you can just add
@@ -123,8 +123,8 @@ crates through the gateway.
 
 ```rust,no_run
 use std::{env, error::Error};
-use tokio::stream::StreamExt;
-use twilight_cache_inmemory::{EventType, InMemoryCache};
+use futures::stream::StreamExt;
+use twilight_cache_inmemory::{InMemoryCache, ResourceType};
 use twilight_gateway::{cluster::{Cluster, ShardScheme}, Event};
 use twilight_http::Client as HttpClient;
 use twilight_model::gateway::Intents;
@@ -157,12 +157,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Since we only care about new messages, make the cache only
     // cache new messages.
     let cache = InMemoryCache::builder()
-        .event_types(
-            EventType::MESSAGE_CREATE
-                | EventType::MESSAGE_DELETE
-                | EventType::MESSAGE_DELETE_BULK
-                | EventType::MESSAGE_UPDATE,
-        )
+        .resource_types(ResourceType::MESSAGE)
         .build();
 
     let mut events = cluster.events();
@@ -223,7 +218,7 @@ All first-party crates are licensed under [ISC][LICENSE.md]
 [license badge]: https://img.shields.io/badge/license-ISC-blue.svg?style=for-the-badge&logo=pastebin
 [license link]: https://github.com/twilight-rs/twilight/blob/trunk/LICENSE.md
 [logo]: https://raw.githubusercontent.com/twilight-rs/twilight/trunk/logo.png
-[rust badge]: https://img.shields.io/badge/rust-stable-93450a.svg?style=for-the-badge&logo=rust
+[rust badge]: https://img.shields.io/badge/rust-1.48+-93450a.svg?style=for-the-badge&logo=rust
 [`tracing-log`]: https://github.com/tokio-rs/tracing/tree/master/tracing-log
 [`twilight-cache-inmemory`]: https://twilight.rs/chapter_1_crates/section_4_cache_inmemory.html
 [`twilight-command-parser`]: https://twilight.rs/chapter_1_crates/section_5_command_parser.html

@@ -2,6 +2,24 @@
 
 Changelog for `twilight-lavalink`.
 
+## [0.3.0] - 2021-01-08
+
+Version 0.3 has been released with the primary intent to upgrade to Tokio 1.0.
+
+### Changes
+
+Upgrade `tokio` from v0.2 to v1 ([#664] - [@vivian]).
+
+[#664]: https://github.com/twilight-rs/twilight/pull/664
+
+## [0.2.2] - 2021-01-05
+
+### Enhancements
+
+Upgrade `dashmap` from version 3 to 4.0 ([#666] - [@vivian]).
+
+[#666]: https://github.com/twilight-rs/twilight/pull/666
+
 ## [0.2.1] - 2020-11-02
 
 Update the installation instructions to note version 0.2 instead of
@@ -51,6 +69,8 @@ Initial release.
 [#548]: https://github.com/twilight-rs/twilight/pull/548
 [#518]: https://github.com/twilight-rs/twilight/pull/518
 
+[0.3.0]: https://github.com/twilight-rs/twilight/releases/tag/lavalink-v0.3.0
+[0.2.2]: https://github.com/twilight-rs/twilight/releases/tag/lavalink-v0.2.2
 [0.2.1]: https://github.com/twilight-rs/twilight/releases/tag/lavalink-v0.2.1
 [0.2.0]: https://github.com/twilight-rs/twilight/releases/tag/lavalink-v0.2.0
 [0.2.0-beta.1]: https://github.com/twilight-rs/twilight/releases/tag/lavalink-v0.2.0-beta.1

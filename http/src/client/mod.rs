@@ -1,14 +1,13 @@
 mod builder;
 
 pub use self::builder::ClientBuilder;
-pub use reqwest::Proxy;
 
 use crate::{
     api_error::{ApiError, ErrorCode},
-    error::{Error, Result, UrlError},
+    error::{Error, Result},
     ratelimiting::{RatelimitHeaders, Ratelimiter},
     request::{
-        channel::message::allowed_mentions::AllowedMentions,
+        channel::allowed_mentions::AllowedMentions,
         guild::{create_guild::CreateGuildError, create_guild_channel::CreateGuildChannelError},
         prelude::*,
         GetUserApplicationInfo, Request,
@@ -16,9 +15,11 @@ use crate::{
     API_VERSION,
 };
 use bytes::Bytes;
-use reqwest::{
+use hyper::{
+    body::{self, Buf},
+    client::{Client as HyperClient, HttpConnector},
     header::{HeaderValue, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, USER_AGENT},
-    Body, Client as ReqwestClient, Method, Response, StatusCode,
+    Body, Method, Response, StatusCode,
 };
 use serde::de::DeserializeOwned;
 use std::{
@@ -29,18 +30,26 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::Duration,
 };
+use tokio::time;
 use twilight_model::{
     guild::Permissions,
     id::{ChannelId, EmojiId, GuildId, IntegrationId, MessageId, RoleId, UserId, WebhookId},
 };
-use url::Url;
+
+#[cfg(feature = "hyper-rustls")]
+type HttpsConnector<T> = hyper_rustls::HttpsConnector<T>;
+#[cfg(all(feature = "hyper-tls", not(feature = "hyper-rustls")))]
+type HttpsConnector<T> = hyper_tls::HttpsConnector<T>;
 
 struct State {
-    http: ReqwestClient,
+    http: HyperClient<HttpsConnector<HttpConnector>, Body>,
+    proxy: Option<Box<str>>,
     ratelimiter: Option<Ratelimiter>,
+    timeout: Duration,
     token_invalid: AtomicBool,
-    token: Option<String>,
+    token: Option<Box<str>>,
     use_http: bool,
     pub(crate) default_allowed_mentions: Option<AllowedMentions>,
 }
@@ -48,7 +57,8 @@ struct State {
 impl Debug for State {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         f.debug_struct("State")
-            .field("http", &"Reqwest HTTP client")
+            .field("http", &self.http)
+            .field("proxy", &self.proxy)
             .field("ratelimiter", &self.ratelimiter)
             .field("token", &self.token)
             .field("use_http", &self.use_http)
@@ -96,7 +106,7 @@ impl Debug for State {
 /// let client = Client::builder()
 ///     .token("my token")
 ///     .timeout(Duration::from_secs(5))
-///     .build()?;
+///     .build();
 /// # Ok(()) }
 /// ```
 ///
@@ -104,41 +114,16 @@ impl Debug for State {
 /// `client`.
 ///
 /// [here]: https://discord.com/developers/applications
-/// [`ClientBuilder`]: struct.ClientBuilder.html
-/// [`Error::Unauthorized`]: ../enum.Error.html#variant.Unauthorized
 #[derive(Clone, Debug)]
 pub struct Client {
     state: Arc<State>,
 }
 
 impl Client {
-    /// Create a new client with a token.
-    ///
-    /// If you want to customize the client, use [`builder`].
-    ///
-    /// [`builder`]: #method.builder
+    /// Create a new `hyper-rustls` or `hyper-tls` backed client with a token.
+    #[cfg_attr(docsrs, doc(cfg(any(feature = "hyper-rustls", feature = "hyper-tls"))))]
     pub fn new(token: impl Into<String>) -> Self {
-        let mut token = token.into();
-
-        let is_bot = token.starts_with("Bot ");
-        let is_bearer = token.starts_with("Bearer ");
-
-        // Make sure it is either a bot or bearer token, and assume it's a bot
-        // token if no prefix is given
-        if !is_bot && !is_bearer {
-            token.insert_str(0, "Bot ");
-        }
-
-        Self {
-            state: Arc::new(State {
-                http: ReqwestClient::new(),
-                ratelimiter: Some(Ratelimiter::new()),
-                token_invalid: AtomicBool::new(false),
-                token: Some(token),
-                use_http: false,
-                default_allowed_mentions: None,
-            }),
-        }
+        ClientBuilder::default().token(token).build()
     }
 
     /// Create a new builder to create a client.
@@ -153,14 +138,14 @@ impl Client {
     /// If the initial token provided is not prefixed with `Bot `, it will be, and this method
     /// reflects that.
     pub fn token(&self) -> Option<&str> {
-        self.state.token.as_ref().map(AsRef::as_ref)
+        self.state.token.as_deref()
     }
 
     /// Get the default allowed mentions for sent messages.
     ///
     /// Refer to [`allowed_mentions`] for more information.
     ///
-    /// [`allowed_mentions`]: ../request/channel/message/allowed_mentions/index.html
+    /// [`allowed_mentions`]: crate::request::channel::allowed_mentions
     pub fn default_allowed_mentions(&self) -> Option<AllowedMentions> {
         self.state.default_allowed_mentions.clone()
     }
@@ -169,40 +154,8 @@ impl Client {
     ///
     /// This will return `None` only if ratelimit handling
     /// has been explicitly disabled in the [`ClientBuilder`].
-    ///
-    /// [`ClientBuilder`]: struct.ClientBuilder.html
     pub fn ratelimiter(&self) -> Option<Ratelimiter> {
         self.state.ratelimiter.clone()
-    }
-
-    /// Add a role to a member in a guild.
-    ///
-    /// # Examples
-    ///
-    /// In guild `1`, add role `2` to user `3`, for the reason `"test"`:
-    ///
-    /// ```rust,no_run
-    /// # use twilight_http::{request::AuditLogReason, Client};
-    /// use twilight_model::id::{GuildId, RoleId, UserId};
-    /// #
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    /// # let client = Client::new("my token");
-    /// #
-    /// let guild_id = GuildId(1);
-    /// let role_id = RoleId(2);
-    /// let user_id = UserId(3);
-    ///
-    /// client.add_role(guild_id, user_id, role_id).reason("test")?.await?;
-    /// # Ok(()) }
-    /// ```
-    pub fn add_role(
-        &self,
-        guild_id: GuildId,
-        user_id: UserId,
-        role_id: RoleId,
-    ) -> AddRoleToMember<'_> {
-        AddRoleToMember::new(self, guild_id, user_id, role_id)
     }
 
     /// Get the audit log for a guild.
@@ -353,9 +306,9 @@ impl Client {
     /// Returns a [`UpdateChannelError::TopicInvalid`] when the length of the topic is more than
     /// 1024 UTF-16 characters.
     ///
-    /// [`UpdateChannelError::NameInvalid`]: ../request/channel/update_channel/enum.UpdateChannelError.html#variant.NameInvalid
-    /// [`UpdateChannelError::RateLimitPerUserInvalid`]: ../request/channel/update_channel/enum.UpdateChannelError.html#variant.RateLimitPerUserInvalid
-    /// [`UpdateChannelError::TopicInvalid`]: ../request/channel/update_channel/enum.UpdateChannelError.html#variant.TopicInvalid
+    /// [`UpdateChannelError::NameInvalid`]: crate::request::channel::update_channel::UpdateChannelError::NameInvalid
+    /// [`UpdateChannelError::RateLimitPerUserInvalid`]: crate::request::channel::update_channel::UpdateChannelError::RateLimitPerUserInvalid
+    /// [`UpdateChannelError::TopicInvalid`]: crate::request::channel::update_channel::UpdateChannelError::TopicInvalid
     pub fn update_channel(&self, channel_id: ChannelId) -> UpdateChannel<'_> {
         UpdateChannel::new(self, channel_id)
     }
@@ -364,8 +317,7 @@ impl Client {
     ///
     /// The type returned is [`FollowedChannel`].
     ///
-    /// [`ChannelId`]: ../../twilight_model/id/struct.ChannelId.html
-    /// [`FollowedChannel`]: ../../twilight_model/channel/followed_channel.html#struct.FollowedChannel
+    /// [`FollowedChannel`]: ::twilight_model::channel::FollowedChannel
     pub fn follow_news_channel(
         &self,
         channel_id: ChannelId,
@@ -414,13 +366,12 @@ impl Client {
     ///
     /// Returns [`GetChannelMessagesError::LimitInvalid`] if the amount is less than 1 or greater than 100.
     ///
-    /// [`ChannelId`]: ../../twilight_model/id/struct.ChannelId.html
-    /// [`after`]: ../request/channel/message/get_channel_messages/struct.GetChannelMessages.html#method.after
-    /// [`around`]: ../request/channel/message/get_channel_messages/struct.GetChannelMessages.html#method.around
-    /// [`before`]: ../request/channel/message/get_channel_messages/struct.GetChannelMessages.html#method.before
-    /// [`GetChannelMessagesConfigured`]: ../request/channel/message/get_channel_messages_configured/struct.GetChannelMessagesConfigured.html
-    /// [`limit`]: ../request/channel/message/get_channel_messages/struct.GetChannelMessages.html#method.limit
-    /// [`GetChannelMessagesError::LimitInvalid`]: ../request/channel/message/get_channel_messages/enum.GetChannelMessagesError.html#variant.LimitInvalid
+    /// [`after`]: GetChannelMessages::after
+    /// [`around`]: GetChannelMessages::around
+    /// [`before`]: GetChannelMessages::before
+    /// [`GetChannelMessagesConfigured`]: crate::request::channel::message::GetChannelMessagesConfigured
+    /// [`limit`]: GetChannelMessages::limit
+    /// [`GetChannelMessagesError::LimitInvalid`]: crate::request::channel::message::get_channel_messages::GetChannelMessagesError::LimitInvalid
     pub fn channel_messages(&self, channel_id: ChannelId) -> GetChannelMessages<'_> {
         GetChannelMessages::new(self, channel_id)
     }
@@ -523,7 +474,7 @@ impl Client {
     /// Returns [`GetCurrentUserGuildsError::LimitInvalid`] if the amount is greater
     /// than 100.
     ///
-    /// [`GetCurrentUserGuildsError::LimitInvalid`]: ../request/user/get_current_user_guilds/enum.GetCurrentUserGuildsError.html#variant.LimitInvalid
+    /// [`GetCurrentUserGuildsError::LimitInvalid`]: crate::request::user::get_current_user_guilds::GetCurrentUserGuildsError::LimitInvalid
     pub fn current_user_guilds(&self) -> GetCurrentUserGuilds<'_> {
         GetCurrentUserGuilds::new(self)
     }
@@ -667,7 +618,7 @@ impl Client {
     ///
     /// Returns [`CreateGuildError::NameInvalid`] if the name length is too short or too long.
     ///
-    /// [`CreateGuildError::NameInvalid`]: ../request/guild/create_guild/enum.CreateGuildError.html#variant.NameInvalid
+    /// [`CreateGuildError::NameInvalid`]: crate::request::guild::create_guild::CreateGuildError::NameInvalid
     pub fn create_guild(
         &self,
         name: impl Into<String>,
@@ -716,9 +667,9 @@ impl Client {
     /// than
     /// 1024 UTF-16 characters.
     ///
-    /// [`CreateGuildChannelError::NameInvalid`]: ../request/guild/create_guild_channel/enum.CreateGuildChannelError.html#variant.NameInvalid
-    /// [`CreateGuildChannelError::RateLimitPerUserInvalid`]: ../request/guild/create_guild_channel/enum.CreateGuildChannelError.html#variant.RateLimitPerUserInvalid
-    /// [`CreateGuildChannelError::TopicInvalid`]: ../request/guild/create_guild_channel/enum.CreateGuildChannelError.html#variant.TopicInvalid
+    /// [`CreateGuildChannelError::NameInvalid`]: crate::request::guild::create_guild_channel::CreateGuildChannelError::NameInvalid
+    /// [`CreateGuildChannelError::RateLimitPerUserInvalid`]: crate::request::guild::create_guild_channel::CreateGuildChannelError::RateLimitPerUserInvalid
+    /// [`CreateGuildChannelError::TopicInvalid`]: crate::request::guild::create_guild_channel::CreateGuildChannelError::TopicInvalid
     pub fn create_guild_channel(
         &self,
         guild_id: GuildId,
@@ -834,7 +785,7 @@ impl Client {
     ///
     /// Returns [`GetGuildMembersError::LimitInvalid`] if the limit is invalid.
     ///
-    /// [`GetGuildMembersError::LimitInvalid`]: ../request/guild/member/get_guild_members/enum.GetGuildMembersError.html#variant.LimitInvalid
+    /// [`GetGuildMembersError::LimitInvalid`]: crate::request::guild::member::get_guild_members::GetGuildMembersError::LimitInvalid
     pub fn guild_members(&self, guild_id: GuildId) -> GetGuildMembers<'_> {
         GetGuildMembers::new(self, guild_id)
     }
@@ -842,6 +793,29 @@ impl Client {
     /// Get a member of a guild, by their id.
     pub fn guild_member(&self, guild_id: GuildId, user_id: UserId) -> GetMember<'_> {
         GetMember::new(self, guild_id, user_id)
+    }
+
+    /// Add a user to a guild.
+    ///
+    /// An access token for the user with `guilds.join` scope is required. All
+    /// other fields are optional. Refer to [the discord docs] for more
+    /// information.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AddGuildMemberError::NicknameInvalid`] if the nickname is too
+    /// short or too long.
+    ///
+    /// [`AddGuildMemberError::NickNameInvalid`]: crate::request::guild::member::add_guild_member::AddGuildMemberError::NicknameInvalid
+    ///
+    /// [the discord docs]: https://discord.com/developers/docs/resources/guild#add-guild-member
+    pub fn add_guild_member(
+        &self,
+        guild_id: GuildId,
+        user_id: UserId,
+        access_token: impl Into<String>,
+    ) -> AddGuildMember<'_> {
+        AddGuildMember::new(self, guild_id, user_id, access_token)
     }
 
     /// Kick a member from a guild.
@@ -858,13 +832,34 @@ impl Client {
     /// Returns [`UpdateGuildMemberError::NicknameInvalid`] if the nickname length is too short or too
     /// long.
     ///
-    /// [`UpdateGuildMemberError::NicknameInvalid`]: ../request/guild/member/update_guild_member/enum.UpdateGuildMemberError.html#variant.NicknameInvalid
+    /// [`UpdateGuildMemberError::NicknameInvalid`]: crate::request::guild::member::update_guild_member::UpdateGuildMemberError::NicknameInvalid
     ///
     /// [the discord docs]: https://discord.com/developers/docs/resources/guild#modify-guild-member
     pub fn update_guild_member(&self, guild_id: GuildId, user_id: UserId) -> UpdateGuildMember<'_> {
         UpdateGuildMember::new(self, guild_id, user_id)
     }
 
+    /// Add a role to a member in a guild.
+    ///
+    /// # Examples
+    ///
+    /// In guild `1`, add role `2` to user `3`, for the reason `"test"`:
+    ///
+    /// ```rust,no_run
+    /// # use twilight_http::{request::AuditLogReason, Client};
+    /// use twilight_model::id::{GuildId, RoleId, UserId};
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    /// # let client = Client::new("my token");
+    /// #
+    /// let guild_id = GuildId(1);
+    /// let role_id = RoleId(2);
+    /// let user_id = UserId(3);
+    ///
+    /// client.add_guild_member_role(guild_id, user_id, role_id).reason("test")?.await?;
+    /// # Ok(()) }
+    /// ```
     pub fn add_guild_member_role(
         &self,
         guild_id: GuildId,
@@ -942,7 +937,7 @@ impl Client {
     /// # Ok(()) }
     /// ```
     ///
-    /// [`with_counts`]: ../request/channel/invite/struct.GetInvite.html#method.with_counts
+    /// [`with_counts`]: crate::request::channel::invite::GetInvite::with_counts
     pub fn invite(&self, code: impl Into<String>) -> GetInvite<'_> {
         GetInvite::new(self, code)
     }
@@ -976,9 +971,6 @@ impl Client {
     }
 
     /// Get a message by [`ChannelId`] and [`MessageId`].
-    ///
-    /// [`ChannelId`]: ../../twilight_model/id/struct.ChannelId.html
-    /// [`MessageId`]: ../../twilight_model/id/struct.MessageId.html
     pub fn message(&self, channel_id: ChannelId, message_id: MessageId) -> GetMessage<'_> {
         GetMessage::new(self, channel_id, message_id)
     }
@@ -1012,21 +1004,17 @@ impl Client {
     /// The method [`embed`] returns [`CreateMessageError::EmbedTooLarge`] if the length of the
     /// embed is over 6000 characters.
     ///
-    /// [`content`]:
-    /// ../request/channel/message/create_message/struct.CreateMessage.html#method.content
-    /// [`embed`]: ../request/channel/message/create_message/struct.CreateMessage.html#method.embed
+    /// [`content`]: crate::request::channel::message::create_message::CreateMessage::content
+    /// [`embed`]: crate::request::channel::message::create_message::CreateMessage::embed
     /// [`CreateMessageError::ContentInvalid`]:
-    /// ../request/channel/message/create_message/enum.CreateMessageError.html#variant.ContentInvalid
+    /// crate::request::channel::message::create_message::CreateMessageError::ContentInvalid
     /// [`CreateMessageError::EmbedTooLarge`]:
-    /// ../request/channel/message/create_message/enum.CreateMessageError.html#variant.EmbedTooLarge
+    /// crate::request::channel::message::create_message::CreateMessageError::EmbedTooLarge
     pub fn create_message(&self, channel_id: ChannelId) -> CreateMessage<'_> {
         CreateMessage::new(self, channel_id)
     }
 
     /// Delete a message by [`ChannelId`] and [`MessageId`].
-    ///
-    /// [`ChannelId`]: ../../twilight_model/id/struct.ChannelId.html
-    /// [`MessageId`]: ../../twilight_model/id/struct.MessageId.html
     pub fn delete_message(
         &self,
         channel_id: ChannelId,
@@ -1041,8 +1029,6 @@ impl Client {
     /// still count towards the lower and upper limits. This method will not delete messages older
     /// than two weeks. Refer to [the discord docs] for more information.
     ///
-    /// [`ChannelId`]: ../../twilight_model/id/struct.ChannelId.html
-    /// [`MessageId`]: ../../twilight_model/id/struct.MessageId.html
     /// [the discord docs]: https://discord.com/developers/docs/resources/channel#bulk-delete-messages
     pub fn delete_messages(
         &self,
@@ -1090,9 +1076,7 @@ impl Client {
     /// # Ok(()) }
     /// ```
     ///
-    /// [`ChannelId`]: ../../twilight_model/id/struct.ChannelId.html
-    /// [`MessageId`]: ../../twilight_model/id/struct.MessageId.html
-    /// [embed]: #method.embed
+    /// [embed]: Self::embed
     pub fn update_message(
         &self,
         channel_id: ChannelId,
@@ -1102,9 +1086,6 @@ impl Client {
     }
 
     /// Crosspost a message by [`ChannelId`] and [`MessageId`].
-    ///
-    /// [`ChannelId`]: ../../twilight_model/id/struct.ChannelId.html
-    /// [`MessageId`]: ../../twilight_model/id/struct.MessageId.html
     pub fn crosspost_message(
         &self,
         channel_id: ChannelId,
@@ -1165,10 +1146,6 @@ impl Client {
     ///     .await?;
     /// # Ok(()) }
     /// ```
-    ///
-    /// [`ChannelId`]: ../../twilight_model/id/struct.ChannelId.html
-    /// [`MessageId`]: ../../twilight_model/id/struct.MessageId.html
-    /// [`RequestReactionType`]: ../request/channel/reaction/enum.RequestReactionType.html
     pub fn create_reaction(
         &self,
         channel_id: ChannelId,
@@ -1325,33 +1302,9 @@ impl Client {
         DeleteWebhook::new(self, id)
     }
 
-    /// Delete a webhook by its URL.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`UrlError::SegmentMissing`] if the URL can not be parsed.
-    ///
-    /// [`UrlError::SegmentMissing`]: ../error/enum.UrlError.html#variant.SegmentMissing
-    pub fn delete_webhook_from_url(&self, url: impl AsRef<str>) -> Result<DeleteWebhook<'_>> {
-        let (id, _) = parse_webhook_url(url)?;
-        Ok(self.delete_webhook(id))
-    }
-
     /// Update a webhook by ID.
     pub fn update_webhook(&self, webhook_id: WebhookId) -> UpdateWebhook<'_> {
         UpdateWebhook::new(self, webhook_id)
-    }
-
-    /// Update a webhook by its URL.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`UrlError::SegmentMissing`] if the URL can not be parsed.
-    ///
-    /// [`UrlError::SegmentMissing`]: ../error/enum.UrlError.html#variant.SegmentMissing
-    pub fn update_webhook_from_url(&self, url: impl AsRef<str>) -> Result<UpdateWebhook<'_>> {
-        let (id, _) = parse_webhook_url(url)?;
-        Ok(self.update_webhook(id))
     }
 
     /// Update a webhook, with a token, by ID.
@@ -1361,21 +1314,6 @@ impl Client {
         token: impl Into<String>,
     ) -> UpdateWebhookWithToken<'_> {
         UpdateWebhookWithToken::new(self, webhook_id, token)
-    }
-
-    /// Update a webhook, with a token, by its URL.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`UrlError::SegmentMissing`] if the URL can not be parsed.
-    ///
-    /// [`UrlError::SegmentMissing`]: ../error/enum.UrlError.html#variant.SegmentMissing
-    pub fn update_webhook_with_token_from_url(
-        &self,
-        url: impl AsRef<str>,
-    ) -> Result<UpdateWebhookWithToken<'_>> {
-        let (id, token) = parse_webhook_url(url)?;
-        Ok(self.update_webhook_with_token(id, token.ok_or(UrlError::SegmentMissing)?))
     }
 
     /// Executes a webhook, sending a message to its channel.
@@ -1400,9 +1338,9 @@ impl Client {
     /// # Ok(()) }
     /// ```
     ///
-    /// [`content`]: ../request/channel/webhook/struct.ExecuteWebhook.html#method.content
-    /// [`embeds`]: ../request/channel/webhook/struct.ExecuteWebhook.html#method.embeds
-    /// [`file`]: ../request/channel/webhook/struct.ExecuteWebhook.html#method.file
+    /// [`content`]: crate::request::channel::webhook::ExecuteWebhook::content
+    /// [`embeds`]: crate::request::channel::webhook::ExecuteWebhook::embeds
+    /// [`file`]: crate::request::channel::webhook::ExecuteWebhook::file
     pub fn execute_webhook(
         &self,
         webhook_id: WebhookId,
@@ -1411,16 +1349,54 @@ impl Client {
         ExecuteWebhook::new(self, webhook_id, token)
     }
 
-    /// Execute a webhook by its URL.
+    /// Update a message executed by a webhook.
     ///
-    /// # Errors
+    /// # Examples
     ///
-    /// Returns [`UrlError::SegmentMissing`] if the URL can not be parsed.
+    /// ```no_run
+    /// # use twilight_http::Client;
+    /// use twilight_model::id::{MessageId, WebhookId};
     ///
-    /// [`UrlError::SegmentMissing`]: ../error/enum.UrlError.html#variant.SegmentMissing
-    pub fn execute_webhook_from_url(&self, url: impl AsRef<str>) -> Result<ExecuteWebhook<'_>> {
-        let (id, token) = parse_webhook_url(url)?;
-        Ok(self.execute_webhook(id, token.ok_or(UrlError::SegmentMissing)?))
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let client = Client::new("token");
+    /// client.update_webhook_message(WebhookId(1), "token here", MessageId(2))
+    ///     .content(Some("new message content".to_owned()))?
+    ///     .await?;
+    /// # Ok(()) }
+    /// ```
+    pub fn update_webhook_message(
+        &self,
+        webhook_id: WebhookId,
+        token: impl Into<String>,
+        message_id: MessageId,
+    ) -> UpdateWebhookMessage<'_> {
+        UpdateWebhookMessage::new(self, webhook_id, token, message_id)
+    }
+
+    /// Delete a message executed by a webhook.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use twilight_http::Client;
+    /// use twilight_model::id::{MessageId, WebhookId};
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let client = Client::new("token");
+    /// client
+    ///     .delete_webhook_message(WebhookId(1), "token here", MessageId(2))
+    ///     .await?;
+    /// # Ok(()) }
+    /// ```
+    pub fn delete_webhook_message(
+        &self,
+        webhook_id: WebhookId,
+        token: impl Into<String>,
+        message_id: MessageId,
+    ) -> DeleteWebhookMessage<'_> {
+        DeleteWebhookMessage::new(self, webhook_id, token, message_id)
     }
 
     /// Execute a request, returning the response.
@@ -1429,9 +1405,8 @@ impl Client {
     ///
     /// Returns [`Error::Unauthorized`] if the configured token has become
     /// invalid due to expiration, revokation, etc.
-    ///
-    /// [`Error::Unauthorized`]: ../enum.Error.html#variant.Unauthorized
-    pub async fn raw(&self, request: Request) -> Result<Response> {
+    #[allow(clippy::too_many_lines)]
+    pub async fn raw(&self, request: Request) -> Result<Response<Body>> {
         if self.state.token_invalid.load(Ordering::Relaxed) {
             return Err(Error::Unauthorized);
         }
@@ -1446,10 +1421,12 @@ impl Client {
         } = request;
 
         let protocol = if self.state.use_http { "http" } else { "https" };
-        let url = format!("{}://discord.com/api/v{}/{}", protocol, API_VERSION, path);
+        let host = self.state.proxy.as_deref().unwrap_or("discord.com");
+
+        let url = format!("{}://{}/api/v{}/{}", protocol, host, API_VERSION, path);
         tracing::debug!("URL: {:?}", url);
 
-        let mut builder = self.state.http.request(method.clone(), &url);
+        let mut builder = hyper::Request::builder().method(method.clone()).uri(&url);
 
         if let Some(ref token) = self.state.token {
             let value = HeaderValue::from_str(&token).map_err(|source| {
@@ -1459,19 +1436,9 @@ impl Client {
                 Error::CreatingHeader { name, source }
             })?;
 
-            builder = builder.header(AUTHORIZATION, value);
-        }
-
-        if let Some(form) = form {
-            builder = builder.multipart(form);
-        } else if let Some(bytes) = body {
-            let len = bytes.len();
-            builder = builder.body(Body::from(bytes));
-            builder = builder.header(CONTENT_LENGTH, len);
-            let content_type = HeaderValue::from_static("application/json");
-            builder = builder.header(CONTENT_TYPE, content_type);
-        } else if method == Method::PUT || method == Method::POST || method == Method::PATCH {
-            builder = builder.header(CONTENT_LENGTH, 0);
+            if let Some(headers) = builder.headers_mut() {
+                headers.insert(AUTHORIZATION, value);
+            }
         }
 
         let user_agent = HeaderValue::from_static(concat!(
@@ -1481,18 +1448,66 @@ impl Client {
             env!("CARGO_PKG_VERSION"),
             ") Twilight-rs",
         ));
-        builder = builder.header(USER_AGENT, user_agent);
 
-        if let Some(req_headers) = req_headers {
-            builder = builder.headers(req_headers);
+        if let Some(headers) = builder.headers_mut() {
+            headers.insert(USER_AGENT, user_agent);
+
+            if let Some(req_headers) = req_headers {
+                for (maybe_name, value) in req_headers {
+                    if let Some(name) = maybe_name {
+                        headers.insert(name, value);
+                    }
+                }
+            }
         }
+
+        let req = if let Some(form) = form {
+            let content_type = HeaderValue::try_from(form.content_type());
+            let form_bytes = form.build();
+            if let Some(headers) = builder.headers_mut() {
+                if let Ok(content_type) = content_type {
+                    headers.insert(CONTENT_TYPE, content_type);
+                }
+                headers.insert(CONTENT_LENGTH, form_bytes.len().into());
+            };
+            builder
+                .body(Body::from(form_bytes))
+                .map_err(|source| Error::BuildingRequest { source })?
+        } else if let Some(bytes) = body {
+            let len = bytes.len();
+
+            if let Some(headers) = builder.headers_mut() {
+                headers.insert(CONTENT_LENGTH, len.into());
+                let content_type = HeaderValue::from_static("application/json");
+                headers.insert(CONTENT_TYPE, content_type);
+            }
+
+            builder
+                .body(Body::from(bytes))
+                .map_err(|source| Error::BuildingRequest { source })?
+        } else if method == Method::PUT || method == Method::POST || method == Method::PATCH {
+            if let Some(headers) = builder.headers_mut() {
+                headers.insert(CONTENT_LENGTH, 0.into());
+            }
+
+            builder
+                .body(Body::empty())
+                .map_err(|source| Error::BuildingRequest { source })?
+        } else {
+            builder
+                .body(Body::empty())
+                .map_err(|source| Error::BuildingRequest { source })?
+        };
+
+        let inner = self.state.http.request(req);
+        let fut = time::timeout(self.state.timeout, inner);
 
         let ratelimiter = match self.state.ratelimiter.as_ref() {
             Some(ratelimiter) => ratelimiter,
             None => {
-                return builder
-                    .send()
+                return fut
                     .await
+                    .map_err(|source| Error::RequestTimedOut { source })?
                     .map_err(|source| Error::RequestError { source })
             }
         };
@@ -1502,9 +1517,9 @@ impl Client {
             .await
             .map_err(|source| Error::RequestCanceled { source })?;
 
-        let resp = builder
-            .send()
+        let resp = fut
             .await
+            .map_err(|source| Error::RequestTimedOut { source })?
             .map_err(|source| Error::RequestError { source })?;
 
         // If the API sent back an Unauthorized response, then the client's
@@ -1534,22 +1549,20 @@ impl Client {
     ///
     /// Returns [`Error::Unauthorized`] if the configured token has become
     /// invalid due to expiration, revokation, etc.
-    ///
-    /// [`Error::Unauthorized`]: ../enum.Error.html#variant.Unauthorized
     pub async fn request<T: DeserializeOwned>(&self, request: Request) -> Result<T> {
         let resp = self.make_request(request).await?;
 
-        let bytes = resp
-            .bytes()
+        let mut buf = body::aggregate(resp.into_body())
             .await
             .map_err(|source| Error::ChunkingResponse { source })?;
 
-        let mut bytes_b = bytes.as_ref().to_vec();
+        let mut bytes = vec![0; buf.remaining()];
+        buf.copy_to_slice(&mut bytes);
 
-        let result = crate::json_from_slice(&mut bytes_b);
+        let result = crate::json_from_slice(&mut bytes);
 
         result.map_err(|source| Error::Parsing {
-            body: (*bytes).to_vec(),
+            body: bytes.to_vec(),
             source,
         })
     }
@@ -1557,7 +1570,7 @@ impl Client {
     pub(crate) async fn request_bytes(&self, request: Request) -> Result<Bytes> {
         let resp = self.make_request(request).await?;
 
-        resp.bytes()
+        hyper::body::to_bytes(resp.into_body())
             .await
             .map_err(|source| Error::ChunkingResponse { source })
     }
@@ -1570,15 +1583,13 @@ impl Client {
     ///
     /// Returns [`Error::Unauthorized`] if the configured token has become
     /// invalid due to expiration, revokation, etc.
-    ///
-    /// [`Error::Unauthorized`]: ../enum.Error.html#variant.Unauthorized
     pub async fn verify(&self, request: Request) -> Result<()> {
         self.make_request(request).await?;
 
         Ok(())
     }
 
-    async fn make_request(&self, request: Request) -> Result<Response> {
+    async fn make_request(&self, request: Request) -> Result<Response<Body>> {
         let resp = self.raw(request).await?;
         let status = resp.status();
 
@@ -1598,16 +1609,16 @@ impl Client {
             _ => {}
         }
 
-        let bytes = resp
-            .bytes()
+        let mut buf = hyper::body::aggregate(resp.into_body())
             .await
             .map_err(|source| Error::ChunkingResponse { source })?;
 
-        let mut bytes_b = bytes.as_ref().to_vec();
+        let mut bytes = vec![0; buf.remaining()];
+        buf.copy_to_slice(&mut bytes);
 
         let error =
-            crate::json_from_slice::<ApiError>(&mut bytes_b).map_err(|source| Error::Parsing {
-                body: bytes.to_vec(),
+            crate::json_from_slice::<ApiError>(&mut bytes).map_err(|source| Error::Parsing {
+                body: bytes.clone(),
                 source,
             })?;
 
@@ -1618,78 +1629,26 @@ impl Client {
         }
 
         Err(Error::Response {
-            body: bytes.as_ref().to_vec(),
+            body: bytes,
             error,
             status,
         })
     }
 }
 
-impl From<ReqwestClient> for Client {
-    fn from(reqwest_client: ReqwestClient) -> Self {
+impl From<HyperClient<HttpsConnector<HttpConnector>>> for Client {
+    fn from(hyper_client: HyperClient<HttpsConnector<HttpConnector>>) -> Self {
         Self {
             state: Arc::new(State {
-                http: reqwest_client,
+                http: hyper_client,
+                proxy: None,
                 ratelimiter: Some(Ratelimiter::new()),
+                timeout: Duration::from_secs(10),
                 token_invalid: AtomicBool::new(false),
                 token: None,
                 use_http: false,
                 default_allowed_mentions: None,
             }),
         }
-    }
-}
-
-/// Parse the webhook ID and token, if it exists in the string.
-fn parse_webhook_url(
-    url: impl AsRef<str>,
-) -> std::result::Result<(WebhookId, Option<String>), UrlError> {
-    let url = Url::parse(url.as_ref())?;
-    let mut segments = url.path_segments().ok_or(UrlError::SegmentMissing)?;
-
-    segments
-        .next()
-        .filter(|s| s == &"api")
-        .ok_or(UrlError::SegmentMissing)?;
-    segments
-        .next()
-        .filter(|s| s == &"webhooks")
-        .ok_or(UrlError::SegmentMissing)?;
-    let id = segments.next().ok_or(UrlError::SegmentMissing)?;
-    let token = segments.next();
-
-    Ok((WebhookId(id.parse()?), token.map(String::from)))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{parse_webhook_url, WebhookId};
-    use std::error::Error;
-
-    #[test]
-    fn parse_webhook_id() -> Result<(), Box<dyn Error>> {
-        assert_eq!(
-            parse_webhook_url("https://discord.com/api/webhooks/123")?,
-            (WebhookId(123), None)
-        );
-        assert!(parse_webhook_url("https://discord.com/foo/bar/456").is_err());
-        assert!(parse_webhook_url("https://discord.com/api/webhooks/").is_err());
-
-        Ok(())
-    }
-
-    #[test]
-    fn parse_webhook_token() -> Result<(), Box<dyn Error>> {
-        assert_eq!(
-            parse_webhook_url("https://discord.com/api/webhooks/456/token")?,
-            (WebhookId(456), Some("token".into()))
-        );
-
-        assert_eq!(
-            parse_webhook_url("https://discord.com/api/webhooks/456/token/slack")?,
-            (WebhookId(456), Some("token".into()))
-        );
-
-        Ok(())
     }
 }

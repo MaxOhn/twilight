@@ -17,8 +17,8 @@ use twilight_model::gateway::payload::Heartbeat;
 ///
 /// This is obtained through [`Shard::info`].
 ///
-/// [`Shard`]: struct.Shard.html
-/// [`Shard::info`]: struct.Shard.html#method.info
+/// [`Shard`]: crate::shard::Shard
+/// [`Shard::info`]: crate::shard::Shard::info
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Latency {
     average: Option<Duration>,
@@ -209,7 +209,7 @@ impl Heartbeater {
         let mut last = true;
 
         loop {
-            tokio::time::delay_for(duration).await;
+            tokio::time::sleep(duration).await;
 
             // Check if a heartbeat acknowledgement was received.
             //

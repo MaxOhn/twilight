@@ -3,7 +3,7 @@ use super::{
     config::Config,
 };
 use crate::{
-    shard::{CommandError, Information, ResumeSession, Shard},
+    shard::{raw_message::Message, CommandError, Information, ResumeSession, SendError, Shard},
     EventTypeFlags, Intents,
 };
 use futures_util::{
@@ -36,6 +36,17 @@ pub enum ClusterCommandError {
     },
 }
 
+impl ClusterCommandError {
+    fn from_send(error: ClusterSendError) -> Self {
+        match error {
+            ClusterSendError::Sending { source } => Self::Sending {
+                source: CommandError::from_send(source),
+            },
+            ClusterSendError::ShardNonexistent { id } => Self::ShardNonexistent { id },
+        }
+    }
+}
+
 impl Display for ClusterCommandError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
@@ -56,6 +67,42 @@ impl Error for ClusterCommandError {
     }
 }
 
+/// Sending a raw websocket message via a shard failed.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ClusterSendError {
+    /// The shard exists, but sending the provided value failed.
+    Sending {
+        /// Reason for the error.
+        source: SendError,
+    },
+    /// Provided shard ID does not exist.
+    ShardNonexistent {
+        /// Provided shard ID.
+        id: u64,
+    },
+}
+
+impl Display for ClusterSendError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            Self::Sending { source } => Display::fmt(source, f),
+            Self::ShardNonexistent { id } => {
+                f.write_fmt(format_args!("shard {} does not exist", id))
+            }
+        }
+    }
+}
+
+impl Error for ClusterSendError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Sending { source } => Some(source),
+            Self::ShardNonexistent { .. } => None,
+        }
+    }
+}
+
 /// Starting a cluster failed.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -66,7 +113,7 @@ pub enum ClusterStartError {
     /// number of recommended number of shards to start fails, which can happen
     /// due to something like a network or response parsing issue.
     ///
-    /// [automatic sharding]: enum.ShardScheme.html#variant.Auto
+    /// [automatic sharding]: ShardScheme::Auto
     RetrievingGatewayInfo {
         /// Reason for the error.
         source: HttpError,
@@ -125,8 +172,7 @@ impl Cluster {
     /// Returns [`ClusterStartError::RetrievingGatewayInfo`] if there was an
     /// HTTP error Retrieving the gateway information.
     ///
-    /// [`ClusterStartError::RetrievingGatewayInfo`]: enum.ClusterStartError.html#variant.RetrievingGatewayInfo
-    /// [`builder`]: #method.builder
+    /// [`builder`]: Self::builder
     pub async fn new(
         token: impl Into<String>,
         intents: Intents,
@@ -163,7 +209,7 @@ impl Cluster {
                 shard_config.shard = [idx, total];
 
                 if let Some(data) = config.resume_sessions.remove(&idx) {
-                    shard_config.session_id = Some(data.session_id);
+                    shard_config.session_id = Some(data.session_id.into_boxed_str());
                     shard_config.sequence = Some(data.sequence);
                 }
 
@@ -286,7 +332,7 @@ impl Cluster {
     /// let cluster = Cluster::new(env::var("DISCORD_TOKEN")?, Intents::empty()).await?;
     /// cluster.up().await;
     ///
-    /// tokio::time::delay_for(Duration::from_secs(60)).await;
+    /// tokio::time::sleep(Duration::from_secs(60)).await;
     ///
     /// for (shard_id, info) in cluster.info() {
     ///     println!(
@@ -317,9 +363,6 @@ impl Cluster {
     ///
     /// Returns [`ClusterCommandError::ShardNonexistent`] if the provided shard
     /// ID does not exist in the cluster.
-    ///
-    /// [`ClusterCommandError::Sending`]: enum.ClusterCommandError.html#variant.Sending
-    /// [`ClusterCommandError::ShardNonexistent`]: enum.ClusterCommandError.html#variant.ShardNonexistent
     pub async fn command(
         &self,
         id: u64,
@@ -344,18 +387,57 @@ impl Cluster {
     ///
     /// Returns [`ClusterCommandError::ShardNonexistent`] if the provided shard
     /// ID does not exist in the cluster.
-    ///
-    /// [`ClusterCommandError::Sending`]: enum.ClusterCommandError.html#variant.Sending
-    /// [`ClusterCommandError::ShardNonexistent`]: enum.ClusterCommandError.html#variant.ShardNonexistent
+    #[deprecated(note = "Use `send` which is more versatile", since = "0.3.0")]
     pub async fn command_raw(&self, id: u64, value: Vec<u8>) -> Result<(), ClusterCommandError> {
+        self.send(id, Message::Binary(value))
+            .await
+            .map_err(ClusterCommandError::from_send)
+    }
+
+    /// Send a raw websocket message.
+    ///
+    /// # Examples
+    ///
+    /// Send a restart close to shard ID 7:
+    ///
+    /// ```no_run
+    /// # #[tokio::main] async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use std::env;
+    /// use twilight_gateway::{
+    ///     cluster::Cluster,
+    ///     shard::raw_message::{CloseFrame, Message},
+    ///     Intents,
+    /// };
+    ///
+    /// let token = env::var("DISCORD_TOKEN")?;
+    /// let cluster = Cluster::new(token, Intents::GUILDS).await?;
+    /// cluster.up().await;
+    ///
+    /// // some time later..
+    /// let close = CloseFrame::from((1012, ""));
+    /// let message = Message::Close(Some(close));
+    /// cluster.send(7, message).await?;
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ClusterCommandError::Sending`] if the shard exists, but
+    /// sending the close code failed.
+    ///
+    /// Returns a [`ClusterCommandError::ShardNonexistent`] if the provided shard
+    /// ID does not exist in the cluster.
+    ///
+    /// [`SessionInactiveError`]: struct.SessionInactiveError.html
+    pub async fn send(&self, id: u64, message: Message) -> Result<(), ClusterSendError> {
         let shard = self
             .shard(id)
-            .ok_or(ClusterCommandError::ShardNonexistent { id })?;
+            .ok_or(ClusterSendError::ShardNonexistent { id })?;
 
         shard
-            .command_raw(value)
+            .send(message)
             .await
-            .map_err(|source| ClusterCommandError::Sending { source })
+            .map_err(|source| ClusterSendError::Sending { source })
     }
 
     /// Return a stream of events from all shards managed by this Cluster.
@@ -370,8 +452,8 @@ impl Cluster {
     /// categories of events, but using [`some_events`] will filter it further
     /// on the client side.
     ///
-    /// [`some_events`]: #method.some_events
-    pub fn events<'a>(&'a self) -> impl Stream<Item = (u64, Event)> + 'a {
+    /// [`some_events`]: Self::some_events
+    pub fn events(&self) -> impl Stream<Item = (u64, Event)> {
         self.some_events(EventTypeFlags::default())
     }
 
@@ -410,16 +492,15 @@ impl Cluster {
     /// # Ok(()) }
     /// ```
     ///
-    /// [`events`]: #method.events
-    pub fn some_events<'a>(
-        &'a self,
-        types: EventTypeFlags,
-    ) -> impl Stream<Item = (u64, Event)> + 'a {
+    /// [`events`]: Self::events
+    pub fn some_events(&self, types: EventTypeFlags) -> impl Stream<Item = (u64, Event)> {
         let shards = self.0.shards.lock().expect("shards poisoned").clone();
         let stream = shards
             .into_iter()
             .map(|(id, shard)| shard.some_events(types).map(move |e| (id, e)));
 
+        // Clippy recommends using bad code here.
+        #[allow(clippy::from_iter_instead_of_collect)]
         SelectAll::from_iter(stream)
     }
 
@@ -445,13 +526,16 @@ impl Cluster {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cluster, ClusterCommandError, ClusterStartError};
+    use super::{Cluster, ClusterCommandError, ClusterSendError, ClusterStartError};
     use static_assertions::{assert_fields, assert_impl_all};
     use std::{error::Error, fmt::Debug};
 
     assert_fields!(ClusterCommandError::Sending: source);
     assert_fields!(ClusterCommandError::ShardNonexistent: id);
     assert_impl_all!(ClusterCommandError: Debug, Error, Send, Sync);
+    assert_fields!(ClusterSendError::Sending: source);
+    assert_fields!(ClusterSendError::ShardNonexistent: id);
+    assert_impl_all!(ClusterSendError: Debug, Error, Send, Sync);
     assert_fields!(ClusterStartError::RetrievingGatewayInfo: source);
     assert_impl_all!(ClusterStartError: Debug, Error, Send, Sync);
     assert_impl_all!(Cluster: Clone, Debug, Send, Sync);

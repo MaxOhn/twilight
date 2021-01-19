@@ -12,7 +12,7 @@
 //!
 //! ```rust,no_run
 //! use std::env;
-//! use tokio::stream::StreamExt;
+//! use futures::stream::StreamExt;
 //! use twilight_cache_inmemory::InMemoryCache;
 //! use twilight_gateway::{Intents, Shard};
 //!
@@ -45,9 +45,9 @@
 //! [github link]: https://github.com/twilight-rs/twilight
 //! [license badge]: https://img.shields.io/badge/license-ISC-blue.svg?style=for-the-badge&logo=pastebin
 //! [license link]: https://github.com/twilight-rs/twilight/blob/trunk/LICENSE.md
-//! [rust badge]: https://img.shields.io/badge/rust-stable-93450a.svg?style=for-the-badge&logo=rust
+//! [rust badge]: https://img.shields.io/badge/rust-1.48+-93450a.svg?style=for-the-badge&logo=rust
 
-#![deny(rust_2018_idioms, unused, warnings)]
+#![deny(rust_2018_idioms, broken_intra_doc_links, unused, warnings)]
 
 #[macro_use]
 extern crate log;
@@ -62,8 +62,8 @@ mod updates;
 
 pub use self::{
     builder::InMemoryCacheBuilder,
-    config::{Config, EventType},
-    stats::{CacheStats, CompactGuild, CompactUser, Metrics},
+    config::{Config, ResourceType},
+    stats::{Metrics, CacheStats},
     updates::UpdateCache,
 };
 
@@ -115,6 +115,28 @@ fn upsert_guild_item<K: Eq + Hash, V: PartialEq>(
     }
 }
 
+// <<<<<<< HEAD
+// =======
+// fn upsert_item<K: Eq + Hash, V: PartialEq>(map: &DashMap<K, Arc<V>>, k: K, v: V) -> Arc<V> {
+//     match map.entry(k) {
+//         Entry::Occupied(e) if **e.get() == v => Arc::clone(e.get()),
+//         Entry::Occupied(mut e) => {
+//             let v = Arc::new(v);
+//             e.insert(Arc::clone(&v));
+
+//             v
+//         }
+//         Entry::Vacant(e) => {
+//             let v = Arc::new(v);
+//             e.insert(Arc::clone(&v));
+
+//             v
+//         }
+//     }
+// }
+
+// When adding a field here, be sure to add it to `InMemoryCache::clear` if
+// necessary.
 #[derive(Debug, Default)]
 struct InMemoryCacheRef {
     config: Arc<Config>,
@@ -174,7 +196,7 @@ struct InMemoryCacheRef {
 /// operation. If you need the guild to always be up-to-date between operations,
 /// then the intent is that you keep getting it from the cache.
 ///
-/// [`Intents`]: ../twilight_model/gateway/struct.Intents.html
+/// [`Intents`]: ::twilight_model::gateway::Intents
 #[derive(Clone, Debug, Default)]
 pub struct InMemoryCache(Arc<InMemoryCacheRef>);
 
@@ -222,7 +244,7 @@ impl InMemoryCache {
     ///
     /// This is an O(1) operation. This requires the [`GUILDS`] intent.
     ///
-    /// [`GUILDS`]: ../twilight_model/gateway/struct.Intents.html#associatedconstant.GUILDS
+    /// [`GUILDS`]: ::twilight_model::gateway::Intents::GUILDS
     pub fn guild_channel(&self, channel_id: ChannelId) -> Option<Arc<GuildChannel>> {
         self.0
             .channels_guild
@@ -245,7 +267,7 @@ impl InMemoryCache {
     ///
     /// This is an O(1) operation. This requires the [`GUILD_EMOJIS`] intent.
     ///
-    /// [`GUILD_EMOJIS`]: ../twilight_model/gateway/struct.Intents.html#associatedconstant.GUILD_EMOJIS
+    /// [`GUILD_EMOJIS`]: ::twilight_model::gateway::Intents::GUILD_EMOJIS
     pub fn emoji(&self, emoji_id: EmojiId) -> Option<Arc<CachedEmoji>> {
         self.0.emojis.get(&emoji_id).map(|x| Arc::clone(&x.data))
     }
@@ -264,7 +286,7 @@ impl InMemoryCache {
     ///
     /// This is an O(1) operation. This requires the [`GUILDS`] intent.
     ///
-    /// [`GUILDS`]: ../twilight_model/gateway/struct.Intents.html#associatedconstant.GUILDS
+    /// [`GUILDS`]: ::twilight_model::gateway::Intents::GUILDS
     pub fn guild(&self, guild_id: GuildId) -> Option<Arc<CachedGuild>> {
         self.0.guilds.get(&guild_id).map(|r| Arc::clone(r.value()))
     }
@@ -274,7 +296,7 @@ impl InMemoryCache {
     /// This is a O(m) operation, where m is the amount of channels in the
     /// guild. This requires the [`GUILDS`] intent.
     ///
-    /// [`GUILDS`]: ../twilight_model/gateway/struct.Intents.html#associatedconstant.GUILDS
+    /// [`GUILDS`]: ::twilight_model::gateway::Intents::GUILDS
     pub fn guild_channels(&self, guild_id: GuildId) -> Option<HashSet<ChannelId>> {
         self.0
             .guild_channels
@@ -287,8 +309,8 @@ impl InMemoryCache {
     /// This is a O(m) operation, where m is the amount of emojis in the guild.
     /// This requires both the [`GUILDS`] and [`GUILD_EMOJIS`] intents.
     ///
-    /// [`GUILDS`]: ../twilight_model/gateway/struct.Intents.html#associatedconstant.GUILDS
-    /// [`GUILD_EMOJIS`]: ../twilight_model/gateway/struct.Intents.html#associatedconstant.GUILD_EMOJIS
+    /// [`GUILDS`]: ::twilight_model::gateway::Intents::GUILDS
+    /// [`GUILD_EMOJIS`]: ::twilight_model::gateway::Intents::GUILD_EMOJIS
     pub fn guild_emojis(&self, guild_id: GuildId) -> Option<HashSet<EmojiId>> {
         self.0
             .guild_emojis
@@ -303,7 +325,7 @@ impl InMemoryCache {
     /// This is a O(m) operation, where m is the amount of members in the guild.
     /// This requires the [`GUILD_MEMBERS`] intent.
     ///
-    /// [`GUILD_MEMBERS`]: ../twilight_model/gateway/struct.Intents.html#associatedconstant.GUILD_MEMBERS
+    /// [`GUILD_MEMBERS`]: ::twilight_model::gateway::Intents::GUILD_MEMBERS
     pub fn guild_members(&self, guild_id: GuildId) -> Option<HashSet<UserId>> {
         self.0
             .guild_members
@@ -316,7 +338,7 @@ impl InMemoryCache {
     /// This is a O(m) operation, where m is the amount of roles in the guild.
     /// This requires the [`GUILDS`] intent.
     ///
-    /// [`GUILDS`]: ../twilight_model/gateway/struct.Intents.html#associatedconstant.GUILDS
+    /// [`GUILDS`]: ::twilight_model::gateway::Intents::GUILDS
     pub fn guild_roles(&self, guild_id: GuildId) -> Option<HashSet<RoleId>> {
         self.0.guild_roles.get(&guild_id).map(|r| r.value().clone())
     }
@@ -325,7 +347,7 @@ impl InMemoryCache {
     ///
     /// This is an O(1) operation. This requires the [`GUILD_MEMBERS`] intent.
     ///
-    /// [`GUILD_MEMBERS`]: ../twilight_model/gateway/struct.Intents.html#associatedconstant.GUILD_MEMBERS
+    /// [`GUILD_MEMBERS`]: ::twilight_model::gateway::Intents::GUILD_MEMBERS
     pub fn member(&self, guild_id: GuildId, user_id: UserId) -> Option<Arc<CachedMember>> {
         self.0
             .members
@@ -336,7 +358,9 @@ impl InMemoryCache {
     /// Gets the latest message by channel ID that returns `Some` through the given function.
     ///
     /// This is an O(n) operation. This requires one or both of the
-    /// [`GUILD_MESSAGES`] or [`DIRECT_MESSAGES`] intents.
+    ///
+    /// [`GUILD_MESSAGES`]: ::twilight_model::gateway::Intents::GUILD_MESSAGES
+    /// [`DIRECT_MESSAGES`]: ::twilight_model::gateway::Intents::DIRECT_MESSAGES
     pub fn message_extract<T>(
         &self,
         channel_id: ChannelId,
@@ -383,7 +407,7 @@ impl InMemoryCache {
     ///
     /// This is an O(1) operation. This requires the [`GUILDS`] intent.
     ///
-    /// [`GUILDS`]: ../twilight_model/gateway/struct.Intents.html#associatedconstant.GUILDS
+    /// [`GUILDS`]: ::twilight_model::gateway::Intents::GUILDS
     pub fn role(&self, role_id: RoleId) -> Option<Arc<Role>> {
         self.0
             .roles
@@ -395,23 +419,33 @@ impl InMemoryCache {
     ///
     /// This is an O(1) operation. This requires the [`GUILD_MEMBERS`] intent.
     ///
-    /// [`GUILD_MEMBERS`]: ../twilight_model/gateway/struct.Intents.html#associatedconstant.GUILD_MEMBERS
+    /// [`GUILD_MEMBERS`]: ::twilight_model::gateway::Intents::GUILD_MEMBERS
     pub fn user(&self, user_id: UserId) -> Option<Arc<User>> {
         self.0.users.get(&user_id).map(|r| Arc::clone(&r.0))
     }
 
-    /// Clears the entire state of the Cache. This is equal to creating a new
-    /// empty Cache.
+    /// Clear the state of the Cache.
+    ///
+    /// This is equal to creating a new empty cache.
     pub fn clear(&self) {
         self.0.channels_guild.clear();
+        self.0.channels_private.clear();
         self.0
             .current_user
             .lock()
             .expect("current user poisoned")
             .take();
         self.0.emojis.clear();
+        self.0.groups.clear();
         self.0.guilds.clear();
+        self.0.guild_channels.clear();
+        self.0.guild_emojis.clear();
+        self.0.guild_members.clear();
+        self.0.guild_roles.clear();
+        self.0.members.clear();
+        self.0.messages.clear();
         self.0.roles.clear();
+        self.0.unavailable_guilds.clear();
         self.0.users.clear();
     }
 
@@ -598,10 +632,10 @@ impl InMemoryCache {
             })
             .or_default();
 
-        self.cache_guild_channels(guild.id, guild.channels.into_iter().map(|(_, v)| v));
-        self.cache_emojis(guild.id, guild.emojis.into_iter().map(|(_, v)| v));
-        self.cache_members(guild.id, guild.members.into_iter().map(|(_, v)| v));
-        self.cache_roles(guild.id, guild.roles.into_iter().map(|(_, v)| v));
+        self.cache_guild_channels(guild.id, guild.channels);
+        self.cache_emojis(guild.id, guild.emojis);
+        self.cache_members(guild.id, guild.members);
+        self.cache_roles(guild.id, guild.roles);
 
         let guild = CachedGuild {
             id: guild.id,
@@ -829,12 +863,18 @@ impl InMemoryCache {
             }
         }
     }
+
+    /// Determine whether the configured cache wants a specific resource to be
+    /// processed.
+    fn wants(&self, resource_type: ResourceType) -> bool {
+        self.0.config.resource_types().contains(resource_type)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::InMemoryCache;
-    use std::{borrow::Cow, collections::HashMap};
+    use std::borrow::Cow;
     use twilight_model::{
         channel::{ChannelType, GuildChannel, TextChannel},
         gateway::payload::{MemberRemove, RoleDelete},
@@ -900,6 +940,7 @@ mod tests {
             name: "test".to_owned(),
             permissions: Permissions::empty(),
             position: 0,
+            tags: None,
         }
     }
 
@@ -934,24 +975,21 @@ mod tests {
 
     #[test]
     fn test_guild_create_channels_have_guild_ids() {
-        let mut channels = HashMap::new();
-        channels.insert(
-            ChannelId(111),
-            GuildChannel::Text(TextChannel {
-                id: ChannelId(111),
-                guild_id: None,
-                kind: ChannelType::GuildText,
-                last_message_id: None,
-                last_pin_timestamp: None,
-                name: "guild channel with no guild id".to_owned(),
-                nsfw: true,
-                permission_overwrites: Vec::new(),
-                parent_id: None,
-                position: 1,
-                rate_limit_per_user: None,
-                topic: None,
-            }),
-        );
+        let mut channels = Vec::new();
+        channels.push(GuildChannel::Text(TextChannel {
+            id: ChannelId(111),
+            guild_id: None,
+            kind: ChannelType::GuildText,
+            last_message_id: None,
+            last_pin_timestamp: None,
+            name: "guild channel with no guild id".to_owned(),
+            nsfw: true,
+            permission_overwrites: Vec::new(),
+            parent_id: None,
+            position: 1,
+            rate_limit_per_user: None,
+            topic: None,
+        }));
 
         let guild = Guild {
             id: GuildId(123),
@@ -963,7 +1001,7 @@ mod tests {
             default_message_notifications: DefaultMessageNotificationLevel::Mentions,
             description: None,
             discovery_splash: None,
-            emojis: HashMap::new(),
+            emojis: Vec::new(),
             explicit_content_filter: ExplicitContentFilter::AllMembers,
             features: vec![],
             icon: None,
@@ -973,7 +1011,7 @@ mod tests {
             max_members: Some(50),
             max_presences: Some(100),
             member_count: Some(25),
-            members: HashMap::new(),
+            members: Vec::new(),
             mfa_level: MfaLevel::Elevated,
             name: "this is a guild".to_owned(),
             owner: Some(false),
@@ -982,16 +1020,16 @@ mod tests {
             preferred_locale: "en-GB".to_owned(),
             premium_subscription_count: Some(0),
             premium_tier: PremiumTier::None,
-            presences: HashMap::new(),
+            presences: Vec::new(),
             region: "us-east".to_owned(),
-            roles: HashMap::new(),
+            roles: Vec::new(),
             splash: None,
             system_channel_id: None,
             system_channel_flags: SystemChannelFlags::SUPPRESS_JOIN_NOTIFICATIONS,
             rules_channel_id: None,
             unavailable: false,
             verification_level: VerificationLevel::VeryHigh,
-            voice_states: HashMap::new(),
+            voice_states: Vec::new(),
             vanity_url_code: None,
             widget_channel_id: None,
             widget_enabled: None,
@@ -1246,5 +1284,15 @@ mod tests {
             assert_eq!(guild_2_emoji_ids.len(), guild_emojis.len());
             assert!(guild_2_emoji_ids.iter().all(|id| guild_emojis.contains(id)));
         }
+    }
+
+    #[test]
+    fn test_clear() {
+        let cache = InMemoryCache::new();
+        cache.cache_emoji(GuildId(1), emoji(EmojiId(3), None));
+        cache.cache_member(GuildId(2), member(UserId(4), GuildId(2)));
+        cache.clear();
+        assert!(cache.0.emojis.is_empty());
+        assert!(cache.0.members.is_empty());
     }
 }

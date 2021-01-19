@@ -1,4 +1,4 @@
-use super::CreateMessage;
+use super::message::CreateMessage;
 use twilight_model::id::{RoleId, UserId};
 
 /// Whether or not the section will be parsed.
@@ -88,7 +88,7 @@ impl VisitAllowedMentionsRoles for ExplicitRole {
 /// # Example
 ///
 /// ```rust,no_run
-/// use twilight_http::request::channel::message::allowed_mentions::AllowedMentionsBuilder;
+/// use twilight_http::request::channel::allowed_mentions::AllowedMentionsBuilder;
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 /// let mut allowed_mentions = AllowedMentionsBuilder::new()
@@ -260,8 +260,6 @@ impl<
     > AllowedMentionsBuilder<'a, E, U, R>
 {
     /// Return a [`CreateMessage`] struct with the specified `allowed_mentions`.
-    ///
-    /// [`CreateMessage`]: ../create_message/struct.CreateMessage.html
     pub fn build(self) -> CreateMessage<'a> {
         match self.create_message {
             Some(mut builder) => {
@@ -279,10 +277,9 @@ impl<
         }
     }
 
-    /// Build a raw [`AllowedMentions`] for use in [`ClientBuilder#default_allowed_mentions`].
+    /// Build a raw [`AllowedMentions`] for use in [`ClientBuilder::default_allowed_mentions`].
     ///
-    /// [`AllowedMentions`]: ./struct.AllowedMentions.html
-    /// [`ClientBuilder#default_allowed_mentions`]: ../../../../client/struct.ClientBuilder.html#method.default_allowed_mentions
+    /// [`ClientBuilder::default_allowed_mentions`]: crate::client::ClientBuilder::default_allowed_mentions
     pub fn build_solo(self) -> AllowedMentions {
         let mut m = AllowedMentions::default();
 

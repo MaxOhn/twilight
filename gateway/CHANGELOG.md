@@ -2,6 +2,63 @@
 
 Changelog for `twilight-gateway`.
 
+## [0.3.1] - 2021-01-11
+
+### Additions
+
+Support sending raw WebSocket messages via `Cluster::send` and `Shard::send`
+([#679] - [@vivian]).
+
+[#679]: https://github.com/twilight-rs/twilight/pull/679
+
+## [0.3.0] - 2021-01-08
+
+Version 0.3 has been released with the primary intent to upgrade to Tokio 1.0.
+
+### Upgrade Path
+
+When using `shard::Sink` pass in the new `shard::raw_message::Message` type
+instead of `tungstenite::Message`. This is mostly equivalent to `tungstenite`'s
+message but prevents exposing it directly, which avoids API breakage when
+upgrading internal websocket dependencies.
+
+### Changes
+
+Hide the `tungstenite` dependency from the public API by creating an equivalent
+to a websocket message that can be constructed and passed in
+([#667] - [@vivian]).
+
+Upgrade `tokio` from v0.2 to v1 ([#664] - [@vivian]).
+
+[#667]: https://github.com/twilight-rs/twilight/pull/667
+[#664]: https://github.com/twilight-rs/twilight/pull/664
+
+## [0.2.7] - 2021-01-05
+
+### Enhancements
+
+Shrink the internal inflater buffer every minute instead of shrinking when the
+capacity is 4 times the length on periodic checks ([#661] - [@chamburr]).
+
+Upgrade `dashmap` from version 3 to 4.0 ([#666] - [@vivian]).
+
+[#666]: https://github.com/twilight-rs/twilight/pull/666
+[#661]: https://github.com/twilight-rs/twilight/pull/661
+
+## [0.2.6] - 2020-12-29
+
+### Fixes
+
+Specify a minimum `twilight-model` dependency version of `^0.2.4` instead of
+`^0.2`.
+
+### Enhancements
+
+Use `Box<str>` instead of `String` internally in order to reduce struct size
+([#647] - [@vivian]).
+
+Document the `metrics` feature ([#642] - [@vivian]).
+
 ## [0.2.5] - 2020-11-29
 
 ### Misc.
@@ -147,6 +204,8 @@ Initial release.
 [@tbnritzdoge]: https://github.com/tbnritzdoge
 [@vivian]: https://github.com/vivian
 
+[#647]: https://github.com/twilight-rs/twilight/pull/647
+[#642]: https://github.com/twilight-rs/twilight/pull/642
 [#624]: https://github.com/twilight-rs/twilight/pull/624
 [#623]: https://github.com/twilight-rs/twilight/pull/623
 [#621]: https://github.com/twilight-rs/twilight/pull/621
@@ -163,6 +222,9 @@ Initial release.
 [#515]: https://github.com/twilight-rs/twilight/pull/515
 [#512]: https://github.com/twilight-rs/twilight/pull/512
 
+[0.3.0]: https://github.com/twilight-rs/twilight/releases/tag/gateway-v0.3.0
+[0.2.7]: https://github.com/twilight-rs/twilight/releases/tag/gateway-v0.2.7
+[0.2.6]: https://github.com/twilight-rs/twilight/releases/tag/gateway-v0.2.6
 [0.2.5]: https://github.com/twilight-rs/twilight/releases/tag/gateway-v0.2.5
 [0.2.4]: https://github.com/twilight-rs/twilight/releases/tag/gateway-v0.2.4
 [0.2.3]: https://github.com/twilight-rs/twilight/releases/tag/gateway-v0.2.3
