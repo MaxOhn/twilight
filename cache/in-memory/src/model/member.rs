@@ -11,6 +11,7 @@ pub struct CachedMember {
     pub user_id: UserId,
     pub guild_id: GuildId,
     pub nick: Option<String>,
+    pub pending: bool,
     pub roles: Vec<RoleId>,
     pub user: Arc<User>,
 }
@@ -47,6 +48,7 @@ impl ColdStorageMember {
             nick: self.nick,
             roles: self.roles,
             user,
+            pending: false,
         }
     }
 }
@@ -76,6 +78,7 @@ mod tests {
         CachedMember {
             guild_id: GuildId(3),
             nick: Some("member nick".to_owned()),
+            pending: false,
             roles: Vec::new(),
             user: Arc::new(user()),
             user_id: UserId(1),
@@ -109,6 +112,7 @@ mod tests {
             joined_at: None,
             mute: true,
             nick: Some("member nick".to_owned()),
+            pending: false,
             premium_since: None,
             roles: Vec::new(),
             user: user(),

@@ -18,7 +18,7 @@ use bytes::Bytes;
 use hyper::{
     body::{self, Buf},
     client::{Client as HyperClient, HttpConnector},
-    header::{HeaderValue, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, USER_AGENT},
+    header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, USER_AGENT},
     Body, Method, Response, StatusCode,
 };
 use serde::de::DeserializeOwned;
@@ -45,6 +45,7 @@ type HttpsConnector<T> = hyper_tls::HttpsConnector<T>;
 
 struct State {
     http: HyperClient<HttpsConnector<HttpConnector>, Body>,
+    default_headers: Option<HeaderMap>,
     proxy: Option<Box<str>>,
     ratelimiter: Option<Ratelimiter>,
     timeout: Duration,
@@ -58,6 +59,7 @@ impl Debug for State {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         f.debug_struct("State")
             .field("http", &self.http)
+            .field("default_headers", &self.default_headers)
             .field("proxy", &self.proxy)
             .field("ratelimiter", &self.ratelimiter)
             .field("token", &self.token)
@@ -70,6 +72,23 @@ impl Debug for State {
 ///
 /// Almost all of the client methods require authentication, and as such, the client must be
 /// supplied with a Discord Token. Get yours [here].
+///
+/// # OAuth
+///
+/// To use Bearer tokens prefix the token with `"Bearer "`, including the space
+/// at the end like so:
+///
+/// ```no_run
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// use std::env;
+/// use twilight_http::Client;
+///
+/// let bearer = env::var("BEARER_TOKEN")?;
+/// let token = format!("Bearer {}", bearer);
+///
+/// let client = Client::new(token);
+/// # Ok(()) }
+/// ```
 ///
 /// # Cloning
 ///
@@ -1461,6 +1480,14 @@ impl Client {
             }
         }
 
+        if let (Some(default_headers), Some(headers)) =
+            (&self.state.default_headers, &mut builder.headers_mut())
+        {
+            for (name, value) in default_headers {
+                headers.insert(name, HeaderValue::from(value));
+            }
+        }
+
         let req = if let Some(form) = form {
             let content_type = HeaderValue::try_from(form.content_type());
             let form_bytes = form.build();
@@ -1641,6 +1668,7 @@ impl From<HyperClient<HttpsConnector<HttpConnector>>> for Client {
         Self {
             state: Arc::new(State {
                 http: hyper_client,
+                default_headers: None,
                 proxy: None,
                 ratelimiter: Some(Ratelimiter::new()),
                 timeout: Duration::from_secs(10),

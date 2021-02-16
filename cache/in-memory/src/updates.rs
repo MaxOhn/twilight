@@ -325,6 +325,7 @@ impl UpdateCache for MemberUpdate {
 
         member.nick = self.nick.clone();
         member.roles = self.roles.clone();
+        member.pending = self.pending;
     }
 }
 
@@ -760,6 +761,7 @@ mod tests {
                 joined_at: None,
                 mute: false,
                 nick: Some("member nick".to_owned()),
+                pending: false,
                 premium_since: None,
                 roles: Vec::new(),
                 user: User {
@@ -791,6 +793,7 @@ mod tests {
             joined_at: None,
             mute: false,
             nick: None,
+            pending: false,
             premium_since: None,
             roles: Vec::new(),
             user: User {
