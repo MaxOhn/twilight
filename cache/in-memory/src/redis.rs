@@ -27,8 +27,6 @@ const STORE_DURATION: u32 = 180; // seconds
 #[derive(Deserialize, Serialize, Debug)]
 pub struct ColdRebootData {
     pub resume_data: HashMap<u64, (String, u64)>,
-    pub shard_count: u64,
-    pub total_shards: u64,
     pub guild_chunks: usize,
     pub user_chunks: usize,
     pub member_chunks: usize,
@@ -77,68 +75,68 @@ impl From<RedisError> for DefrostError {
 impl InMemoryCache {
     pub async fn from_redis(
         redis: &ConnectionPool,
-        total_shards: u64,
-        shards_per_cluster: u64,
         config: Config,
     ) -> (Self, Option<HashMap<u64, ResumeSession>>) {
         let cache = Self::new_with_config(config);
         let mut connection = redis.get().await;
         let key = "cb_cluster_data";
+
         if let Some(data) = connection.get(key).await.ok().flatten() {
             let cold_cache: ColdRebootData = serde_json::from_slice(&data).unwrap();
             connection.del(key).await.unwrap();
-            if cold_cache.total_shards == total_shards
-                && cold_cache.shard_count == shards_per_cluster
-            {
-                let map: HashMap<_, _> = cold_cache
-                    .resume_data
-                    .iter()
-                    .map(|(id, data)| {
-                        (
-                            *id,
-                            ResumeSession {
-                                session_id: data.0.to_owned(),
-                                sequence: data.1,
-                            },
-                        )
-                    })
-                    .collect();
-                let start = Instant::now();
-                if let Err((cause, why)) = cache.restore_cold_resume(redis, cold_cache).await {
-                    error!("Cold resume defrosting failed ({}): {}", cause, why);
-                    if let Some(source) = why.source() {
-                        error!(" - caused by: {}", source);
-                    }
-                    cache.clear();
-                } else {
-                    cache
-                        .0
-                        .metrics
-                        .channels_guild
-                        .store(cache.0.channels_guild.len(), Relaxed);
-                    // cache.0.metrics.emojis.store(cache.0.emojis.len(), Relaxed);
-                    cache.0.metrics.guilds.store(cache.0.guilds.len(), Relaxed);
-                    cache
-                        .0
-                        .metrics
-                        .members
-                        .store(cache.0.members.len(), Relaxed);
-                    cache.0.metrics.roles.store(cache.0.roles.len(), Relaxed);
-                    // cache
-                    //     .0
-                    //     .metrics
-                    //     .unavailable_guilds
-                    //     .store(cache.0.unavailable_guilds.len(), Relaxed);
-                    cache.0.metrics.users.store(cache.0.users.len(), Relaxed);
-                    let end = Instant::now();
-                    debug!(
-                        "Cold resume defrosting completed in {}ms",
-                        (end - start).as_millis()
-                    );
+
+            let map: HashMap<_, _> = cold_cache
+                .resume_data
+                .iter()
+                .map(|(id, data)| {
+                    let session = ResumeSession {
+                        session_id: data.0.to_owned(),
+                        sequence: data.1,
+                    };
+
+                    (*id, session)
+                })
+                .collect();
+
+            let start = Instant::now();
+
+            if let Err((cause, why)) = cache.restore_cold_resume(redis, cold_cache).await {
+                error!("Cold resume defrosting failed ({}): {}", cause, why);
+
+                if let Some(source) = why.source() {
+                    error!(" - caused by: {}", source);
                 }
-                return (cache, Some(map));
+
+                cache.clear();
+            } else {
+                cache
+                    .0
+                    .metrics
+                    .channels_guild
+                    .store(cache.0.channels_guild.len(), Relaxed);
+
+                // cache.0.metrics.emojis.store(cache.0.emojis.len(), Relaxed);
+                cache.0.metrics.guilds.store(cache.0.guilds.len(), Relaxed);
+
+                cache
+                    .0
+                    .metrics
+                    .members
+                    .store(cache.0.members.len(), Relaxed);
+
+                cache.0.metrics.roles.store(cache.0.roles.len(), Relaxed);
+                cache.0.metrics.users.store(cache.0.users.len(), Relaxed);
+                let end = Instant::now();
+
+                debug!(
+                    "Cold resume defrosting completed in {}ms",
+                    (end - start).as_millis()
+                );
             }
+
+            return (cache, Some(map));
         }
+
         (cache, None)
     }
 
@@ -155,41 +153,52 @@ impl InMemoryCache {
         let guild_defrosters: Vec<_> = (0..reboot_data.guild_chunks)
             .map(|i| self.defrost_guilds(redis, i))
             .collect();
+
         future::try_join_all(guild_defrosters)
             .await
             .map_err(|e| ("guilds", e))?;
+
         // --- Users ---
         let user_defrosters: Vec<_> = (0..reboot_data.user_chunks)
             .map(|i| self.defrost_users(redis, i))
             .collect();
+
         future::try_join_all(user_defrosters)
             .await
             .map_err(|e| ("users", e))?;
+
         // --- Members ---
         let member_defrosters: Vec<_> = (0..reboot_data.member_chunks)
             .map(|i| self.defrost_members(redis, i))
             .collect();
+
         future::try_join_all(member_defrosters)
             .await
             .map_err(|e| ("members", e))?;
+
         // --- Channels ---
         let channel_defrosters: Vec<_> = (0..reboot_data.channel_chunks)
             .map(|i| self.defrost_channels(redis, i))
             .collect();
+
         future::try_join_all(channel_defrosters)
             .await
             .map_err(|e| ("channels", e))?;
+
         // --- Roles ---
         let role_defrosters: Vec<_> = (0..reboot_data.role_chunks)
             .map(|i| self.defrost_roles(redis, i))
             .collect();
+
         future::try_join_all(role_defrosters)
             .await
             .map_err(|e| ("roles", e))?;
+
         // --- CurrentUser ---
         self.defrost_current_user(redis)
             .await
             .map_err(|e| ("current_user", e))?;
+
         debug!(
             "Cache defrosting complete:\n\
             {} guilds | {} channels_guild | {} users\n\
@@ -221,6 +230,7 @@ impl InMemoryCache {
                 .map(|guard| guard.value().len())
                 .sum::<usize>(),
         );
+
         Ok(())
     }
 
@@ -231,9 +241,11 @@ impl InMemoryCache {
         let guilds: Vec<CachedGuild> = serde_json::from_slice(&data)?;
         connection.del(key).await?;
         debug!("Worker {} found {} guilds to defrost", index, guilds.len());
+
         for guild in guilds {
             self.0.guilds.insert(guild.id, Arc::new(guild));
         }
+
         Ok(())
     }
 
@@ -244,10 +256,12 @@ impl InMemoryCache {
         let users: Vec<ColdStorageUser> = serde_json::from_slice(&data)?;
         connection.del(key).await?;
         debug!("Worker {} found {} users to defrost", index, users.len());
+
         for user in users {
             let (user, guilds) = user.into();
             self.0.users.insert(user.id, (Arc::new(user), guilds));
         }
+
         Ok(())
     }
 
@@ -257,26 +271,31 @@ impl InMemoryCache {
         let data = connection.get(&key).await?.unwrap();
         let members: Vec<ColdStorageMember> = serde_json::from_slice(&data)?;
         connection.del(key).await?;
+
         debug!(
             "Worker {} found {} members to defrost",
             index,
             members.len()
         );
+
         for member in members {
             self.0
                 .guild_members
                 .entry(member.guild_id)
                 .or_insert_with(HashSet::new)
                 .insert(member.user_id);
+
             let user = match self.0.users.get(&member.user_id) {
                 Some(guard) => Arc::clone(&guard.value().0),
                 None => continue,
             };
+
             self.0.members.insert(
                 (member.guild_id, member.user_id),
                 Arc::new(member.into_cached_member(user)),
             );
         }
+
         Ok(())
     }
 
@@ -286,19 +305,23 @@ impl InMemoryCache {
         let data = connection.get(&key).await?.unwrap();
         let channels: Vec<ColdStorageTextChannel> = serde_json::from_slice(&data)?;
         connection.del(key).await?;
+
         debug!(
             "Worker {} found {} textchannels to defrost",
             index,
             channels.len()
         );
+
         for channel in channels {
             self.0
                 .guild_channels
                 .entry(channel.guild_id.unwrap())
                 .or_insert_with(HashSet::new)
                 .insert(channel.id);
+
             self.0.channels_guild.insert(channel.id, channel.into());
         }
+
         Ok(())
     }
 
@@ -309,15 +332,19 @@ impl InMemoryCache {
         let roles: Vec<ColdStorageRole> = serde_json::from_slice(&data)?;
         connection.del(key).await?;
         debug!("Worker {} found {} role to defrost", index, roles.len());
+
         for role in roles {
             let role: GuildItem<Role> = role.into();
+
             self.0
                 .guild_roles
                 .entry(role.guild_id)
                 .or_insert_with(HashSet::new)
                 .insert(role.data.id);
+
             self.0.roles.insert(role.data.id, role);
         }
+
         Ok(())
     }
 
@@ -329,6 +356,7 @@ impl InMemoryCache {
         connection.del(key).await?;
         *self.0.current_user.lock().unwrap() = Some(Arc::new(user.into()));
         debug!("Worker found current user to defrost");
+
         Ok(())
     }
 
@@ -340,49 +368,63 @@ impl InMemoryCache {
         &self,
         redis: &ConnectionPool,
         resume_data: HashMap<u64, ResumeSession>,
-        total_shards: u64,
-        shards_per_cluster: u64,
     ) {
         let start = Instant::now();
+
         // --- Guilds ---
         let guild_chunks = self.0.guilds.len() / 100_000 + 1;
         let mut guild_work_orders = vec![Vec::with_capacity(500); guild_chunks];
+
         for (i, guard) in self.0.guilds.iter().enumerate() {
             guild_work_orders[i % guild_chunks].push(*guard.key());
         }
+
         debug!("Freezing {} guilds", self.0.guilds.len());
+
         let guild_tasks: Vec<_> = guild_work_orders
             .into_iter()
             .enumerate()
             .map(|(i, order)| self._prepare_cold_resume_guild(redis, order, i))
             .collect();
+
         future::join_all(guild_tasks).await;
+
         // --- Users ---
         let user_chunks = self.0.users.len() / 100_000 + 1;
         let mut user_work_orders = vec![Vec::with_capacity(50_000); user_chunks];
+
         for (i, guard) in self.0.users.iter().enumerate() {
             user_work_orders[i % user_chunks].push(*guard.key());
         }
+
         debug!("Freezing {} users", self.0.users.len());
+
         let user_tasks: Vec<_> = user_work_orders
             .into_iter()
             .enumerate()
             .map(|(i, chunk)| self._prepare_cold_resume_user(redis, chunk, i))
             .collect();
+
         future::join_all(user_tasks).await;
+
         // --- Members ---
         let member_chunks = self.0.members.len() / 100_000 + 1;
         let mut member_work_orders = vec![Vec::with_capacity(50_000); member_chunks];
+
         for (i, guard) in self.0.members.iter().enumerate() {
             member_work_orders[i % member_chunks].push(*guard.key());
         }
+
         debug!("Freezing {} members", self.0.members.len());
+
         let member_tasks: Vec<_> = member_work_orders
             .into_iter()
             .enumerate()
             .map(|(i, chunk)| self._prepare_cold_resume_member(redis, chunk, i))
             .collect();
+
         future::join_all(member_tasks).await;
+
         // --- Channels ---
         let channels_len = self
             .0
@@ -390,36 +432,48 @@ impl InMemoryCache {
             .iter()
             .filter(|guard| matches!(guard.value().data.deref(), GuildChannel::Text(_)))
             .count();
+
         let channel_chunks = channels_len / 100_000 + 1;
         let mut channel_work_orders = vec![Vec::with_capacity(50_000); channel_chunks];
+
         let iter = self
             .0
             .channels_guild
             .iter()
             .filter(|guard| matches!(guard.value().data.deref(), GuildChannel::Text(_)));
+
         for (i, guard) in iter.enumerate() {
             channel_work_orders[i % channel_chunks].push(*guard.key());
         }
+
         debug!("Freezing {} channels", channels_len);
+
         let channel_tasks: Vec<_> = channel_work_orders
             .into_iter()
             .enumerate()
             .map(|(i, chunk)| self._prepare_cold_resume_channel(redis, chunk, i))
             .collect();
+
         future::join_all(channel_tasks).await;
+
         // --- Roles ---
         let role_chunks = self.0.roles.len() / 100_000 + 1;
         let mut role_work_orders = vec![Vec::with_capacity(5_000); role_chunks];
+
         for (i, guard) in self.0.roles.iter().enumerate() {
             role_work_orders[i % role_chunks].push(*guard.key());
         }
+
         debug!("Freezing {} roles", self.0.roles.len());
+
         let role_tasks: Vec<_> = role_work_orders
             .into_iter()
             .enumerate()
             .map(|(i, chunk)| self._prepare_cold_resume_role(redis, chunk, i))
             .collect();
+
         future::join_all(role_tasks).await;
+
         // --- CurrentUser ---
         debug!("Freezing current user");
         self._prepare_cold_resume_current_user(redis).await;
@@ -431,17 +485,18 @@ impl InMemoryCache {
             .into_iter()
             .map(|(shard_id, info)| (shard_id, (info.session_id, info.sequence)))
             .collect();
+
         let data = ColdRebootData {
             resume_data: map,
-            total_shards,
             guild_chunks,
-            shard_count: shards_per_cluster,
             user_chunks,
             member_chunks,
             channel_chunks,
             role_chunks,
         };
+
         let mut connection = redis.get().await;
+
         let data_result = connection
             .set_and_expire_seconds(
                 "cb_cluster_data",
@@ -449,10 +504,13 @@ impl InMemoryCache {
                 STORE_DURATION,
             )
             .await;
+
         if let Err(why) = data_result {
             warn!("Error while storing cluster data onto redis: {}", why);
         }
+
         let end = Instant::now();
+
         info!(
             "Cold resume preparations completed in {}ms",
             (end - start).as_millis()
@@ -470,13 +528,17 @@ impl InMemoryCache {
             index,
             orders.len()
         );
+
         let mut connection = redis.get().await;
+
         let to_dump: Vec<_> = orders
             .into_iter()
             .filter_map(|key| self.0.guilds.remove(&key))
             .map(|(_, g)| g)
             .collect();
+
         let serialized = serde_json::to_string(&to_dump).unwrap();
+
         let dump_task = connection
             .set_and_expire_seconds(
                 format!("cb_cluster_guild_chunk_{}", index),
@@ -484,6 +546,7 @@ impl InMemoryCache {
                 STORE_DURATION,
             )
             .await;
+
         if let Err(why) = dump_task {
             debug!(
                 "Error while setting redis' `cb_cluster_guild_chunk_{}`: {}",
@@ -500,6 +563,7 @@ impl InMemoryCache {
     ) {
         debug!("Worker {} freezing {} users", index, chunk.len());
         let mut connection = redis.get().await;
+
         let users: Vec<_> = chunk
             .into_iter()
             .filter_map(|key| self.0.users.remove(&key))
@@ -520,7 +584,9 @@ impl InMemoryCache {
                 guilds,
             })
             .collect();
+
         let serialized = serde_json::to_string(&users).unwrap();
+
         let worker_task = connection
             .set_and_expire_seconds(
                 format!("cb_cluster_user_chunk_{}", index),
@@ -528,6 +594,7 @@ impl InMemoryCache {
                 STORE_DURATION,
             )
             .await;
+
         if let Err(why) = worker_task {
             debug!(
                 "Error while setting redis' `cb_cluster_user_chunk_{}`: {}",
@@ -547,14 +614,18 @@ impl InMemoryCache {
             index,
             orders.len()
         );
+
         let mut connection = redis.get().await;
+
         let to_dump: Vec<_> = orders
             .into_iter()
             .filter_map(|key| self.0.members.remove(&key))
             .map(|(_, g)| g)
             .map(ColdStorageMember::from)
             .collect();
+
         let serialized = serde_json::to_string(&to_dump).unwrap();
+
         let dump_task = connection
             .set_and_expire_seconds(
                 format!("cb_cluster_member_chunk_{}", index),
@@ -562,6 +633,7 @@ impl InMemoryCache {
                 STORE_DURATION,
             )
             .await;
+
         if let Err(why) = dump_task {
             debug!(
                 "Error while setting redis' `cb_cluster_member_chunk_{}`: {}",
@@ -581,7 +653,9 @@ impl InMemoryCache {
             index,
             orders.len()
         );
+
         let mut connection = redis.get().await;
+
         let to_dump: Vec<_> = orders
             .into_iter()
             .filter_map(|key| self.0.channels_guild.remove(&key))
@@ -603,7 +677,9 @@ impl InMemoryCache {
                 _ => None,
             })
             .collect();
+
         let serialized = serde_json::to_string(&to_dump).unwrap();
+
         let dump_task = connection
             .set_and_expire_seconds(
                 format!("cb_cluster_channel_chunk_{}", index),
@@ -611,6 +687,7 @@ impl InMemoryCache {
                 STORE_DURATION,
             )
             .await;
+
         if let Err(why) = dump_task {
             debug!(
                 "Error while setting redis' `cb_cluster_channel_chunk_{}`: {}",
@@ -630,7 +707,9 @@ impl InMemoryCache {
             index,
             orders.len()
         );
+
         let mut connection = redis.get().await;
+
         let to_dump: Vec<_> = orders
             .into_iter()
             .filter_map(|key| self.0.roles.remove(&key))
@@ -646,7 +725,9 @@ impl InMemoryCache {
                 position: g.data.position,
             })
             .collect();
+
         let serialized = serde_json::to_string(&to_dump).unwrap();
+
         let dump_task = connection
             .set_and_expire_seconds(
                 format!("cb_cluster_role_chunk_{}", index),
@@ -654,6 +735,7 @@ impl InMemoryCache {
                 STORE_DURATION,
             )
             .await;
+
         if let Err(why) = dump_task {
             debug!(
                 "Error while setting redis' `cb_cluster_role_chunk_{}`: {}",
@@ -677,10 +759,13 @@ impl InMemoryCache {
                 public_flags: user.public_flags,
                 verified: user.verified,
             };
+
             let serialized = serde_json::to_string(&user).unwrap();
+
             let dump_task = connection
                 .set_and_expire_seconds("cb_cluster_current_user", serialized, STORE_DURATION)
                 .await;
+
             if let Err(why) = dump_task {
                 debug!(
                     "Error while setting redis' `cb_cluster_current_user`: {}",
