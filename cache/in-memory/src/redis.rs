@@ -4,7 +4,10 @@ use super::{
 };
 
 use darkredis::{ConnectionPool, Error as RedisError};
-use futures::future;
+use futures::{
+    future::{Either, TryFutureExt},
+    stream::{FuturesUnordered, StreamExt},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Error as SerdeError;
 use std::{
@@ -149,55 +152,58 @@ impl InMemoryCache {
         redis: &ConnectionPool,
         reboot_data: ColdRebootData,
     ) -> Result<(), (&'static str, DefrostError)> {
-        // --- Guilds ---
-        let guild_defrosters: Vec<_> = (0..reboot_data.guild_chunks)
-            .map(|i| self.defrost_guilds(redis, i))
-            .collect();
+        let mut defrost_futs = FuturesUnordered::new();
 
-        future::try_join_all(guild_defrosters)
-            .await
-            .map_err(|e| ("guilds", e))?;
+        // --- Guilds ---
+        let guild_defrosters = (0..reboot_data.guild_chunks)
+            .map(|i| self.defrost_guilds(redis, i).map_err(|e| ("guild", e)))
+            .map(Either::Left);
+        defrost_futs.extend(guild_defrosters);
 
         // --- Users ---
-        let user_defrosters: Vec<_> = (0..reboot_data.user_chunks)
-            .map(|i| self.defrost_users(redis, i))
-            .collect();
-
-        future::try_join_all(user_defrosters)
-            .await
-            .map_err(|e| ("users", e))?;
+        let user_defrosters = (0..reboot_data.user_chunks)
+            .map(|i| self.defrost_users(redis, i).map_err(|e| ("users", e)))
+            .map(Either::Left)
+            .map(Either::Right);
+        defrost_futs.extend(user_defrosters);
 
         // --- Members ---
-        let member_defrosters: Vec<_> = (0..reboot_data.member_chunks)
-            .map(|i| self.defrost_members(redis, i))
-            .collect();
-
-        future::try_join_all(member_defrosters)
-            .await
-            .map_err(|e| ("members", e))?;
+        let member_defrosters = (0..reboot_data.member_chunks)
+            .map(|i| self.defrost_members(redis, i).map_err(|e| ("members", e)))
+            .map(Either::Left)
+            .map(Either::Right)
+            .map(Either::Right);
+        defrost_futs.extend(member_defrosters);
 
         // --- Channels ---
-        let channel_defrosters: Vec<_> = (0..reboot_data.channel_chunks)
-            .map(|i| self.defrost_channels(redis, i))
-            .collect();
-
-        future::try_join_all(channel_defrosters)
-            .await
-            .map_err(|e| ("channels", e))?;
+        let channel_defrosters = (0..reboot_data.channel_chunks)
+            .map(|i| self.defrost_channels(redis, i).map_err(|e| ("channels", e)))
+            .map(Either::Left)
+            .map(Either::Right)
+            .map(Either::Right)
+            .map(Either::Right);
+        defrost_futs.extend(channel_defrosters);
 
         // --- Roles ---
-        let role_defrosters: Vec<_> = (0..reboot_data.role_chunks)
-            .map(|i| self.defrost_roles(redis, i))
-            .collect();
-
-        future::try_join_all(role_defrosters)
-            .await
-            .map_err(|e| ("roles", e))?;
+        let role_defrosters = (0..reboot_data.role_chunks)
+            .map(|i| self.defrost_roles(redis, i).map_err(|e| ("roles", e)))
+            .map(Either::Left)
+            .map(Either::Right)
+            .map(Either::Right)
+            .map(Either::Right)
+            .map(Either::Right);
+        defrost_futs.extend(role_defrosters);
 
         // --- CurrentUser ---
-        self.defrost_current_user(redis)
-            .await
-            .map_err(|e| ("current_user", e))?;
+        let current_user_defroster = self
+            .defrost_current_user(redis)
+            .map_err(|e| ("current_user", e));
+        let current_user_defroster = Either::Right(Either::Right(Either::Right(Either::Right(
+            Either::Right(current_user_defroster),
+        ))));
+        defrost_futs.push(current_user_defroster);
+
+        while defrost_futs.next().await.transpose()?.is_some() {}
 
         debug!(
             "Cache defrosting complete:\n\
@@ -370,6 +376,7 @@ impl InMemoryCache {
         resume_data: HashMap<u64, ResumeSession>,
     ) {
         let start = Instant::now();
+        let mut prepare_futs = FuturesUnordered::new();
 
         // --- Guilds ---
         let guild_chunks = self.0.guilds.len() / 100_000 + 1;
@@ -381,13 +388,13 @@ impl InMemoryCache {
 
         debug!("Freezing {} guilds", self.0.guilds.len());
 
-        let guild_tasks: Vec<_> = guild_work_orders
+        let guild_tasks = guild_work_orders
             .into_iter()
             .enumerate()
             .map(|(i, order)| self._prepare_cold_resume_guild(redis, order, i))
-            .collect();
+            .map(Either::Left);
 
-        future::join_all(guild_tasks).await;
+        prepare_futs.extend(guild_tasks);
 
         // --- Users ---
         let user_chunks = self.0.users.len() / 100_000 + 1;
@@ -399,13 +406,14 @@ impl InMemoryCache {
 
         debug!("Freezing {} users", self.0.users.len());
 
-        let user_tasks: Vec<_> = user_work_orders
+        let user_tasks = user_work_orders
             .into_iter()
             .enumerate()
             .map(|(i, chunk)| self._prepare_cold_resume_user(redis, chunk, i))
-            .collect();
+            .map(Either::Left)
+            .map(Either::Right);
 
-        future::join_all(user_tasks).await;
+        prepare_futs.extend(user_tasks);
 
         // --- Members ---
         let member_chunks = self.0.members.len() / 100_000 + 1;
@@ -417,13 +425,15 @@ impl InMemoryCache {
 
         debug!("Freezing {} members", self.0.members.len());
 
-        let member_tasks: Vec<_> = member_work_orders
+        let member_tasks = member_work_orders
             .into_iter()
             .enumerate()
             .map(|(i, chunk)| self._prepare_cold_resume_member(redis, chunk, i))
-            .collect();
+            .map(Either::Left)
+            .map(Either::Right)
+            .map(Either::Right);
 
-        future::join_all(member_tasks).await;
+        prepare_futs.extend(member_tasks);
 
         // --- Channels ---
         let channels_len = self
@@ -448,13 +458,16 @@ impl InMemoryCache {
 
         debug!("Freezing {} channels", channels_len);
 
-        let channel_tasks: Vec<_> = channel_work_orders
+        let channel_tasks = channel_work_orders
             .into_iter()
             .enumerate()
             .map(|(i, chunk)| self._prepare_cold_resume_channel(redis, chunk, i))
-            .collect();
+            .map(Either::Left)
+            .map(Either::Right)
+            .map(Either::Right)
+            .map(Either::Right);
 
-        future::join_all(channel_tasks).await;
+        prepare_futs.extend(channel_tasks);
 
         // --- Roles ---
         let role_chunks = self.0.roles.len() / 100_000 + 1;
@@ -466,17 +479,27 @@ impl InMemoryCache {
 
         debug!("Freezing {} roles", self.0.roles.len());
 
-        let role_tasks: Vec<_> = role_work_orders
+        let role_tasks = role_work_orders
             .into_iter()
             .enumerate()
             .map(|(i, chunk)| self._prepare_cold_resume_role(redis, chunk, i))
-            .collect();
+            .map(Either::Left)
+            .map(Either::Right)
+            .map(Either::Right)
+            .map(Either::Right)
+            .map(Either::Right);
 
-        future::join_all(role_tasks).await;
+        prepare_futs.extend(role_tasks);
 
         // --- CurrentUser ---
         debug!("Freezing current user");
-        self._prepare_cold_resume_current_user(redis).await;
+        let current_user_task = Either::Right(Either::Right(Either::Right(Either::Right(
+            Either::Right(self._prepare_cold_resume_current_user(redis)),
+        ))));
+
+        prepare_futs.push(current_user_task);
+
+        while prepare_futs.next().await.is_some() {}
 
         // ------
 
