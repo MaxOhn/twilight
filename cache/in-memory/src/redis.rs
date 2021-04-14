@@ -29,7 +29,7 @@ const STORE_DURATION: u32 = 180; // seconds
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct ColdRebootData {
-    pub resume_data: HashMap<u64, (String, u64)>,
+    pub resume_data: HashMap<u64, ResumeSession>,
     pub guild_chunks: usize,
     pub user_chunks: usize,
     pub member_chunks: usize,
@@ -85,21 +85,11 @@ impl InMemoryCache {
         let key = "cb_cluster_data";
 
         if let Some(data) = connection.get(key).await.ok().flatten() {
-            let cold_cache: ColdRebootData = serde_json::from_slice(&data).unwrap();
+            let mut cold_cache: ColdRebootData = serde_json::from_slice(&data).unwrap();
             connection.del(key).await.unwrap();
 
-            let map: HashMap<_, _> = cold_cache
-                .resume_data
-                .iter()
-                .map(|(id, data)| {
-                    let session = ResumeSession {
-                        session_id: data.0.to_owned(),
-                        sequence: data.1,
-                    };
-
-                    (*id, session)
-                })
-                .collect();
+            let mut resume_data = HashMap::new();
+            std::mem::swap(&mut resume_data, &mut cold_cache.resume_data);
 
             let start = Instant::now();
 
@@ -137,7 +127,7 @@ impl InMemoryCache {
                 );
             }
 
-            return (cache, Some(map));
+            return (cache, Some(resume_data));
         }
 
         (cache, None)
@@ -504,13 +494,8 @@ impl InMemoryCache {
         // ------
 
         // Prepare resume data
-        let map: HashMap<_, _> = resume_data
-            .into_iter()
-            .map(|(shard_id, info)| (shard_id, (info.session_id, info.sequence)))
-            .collect();
-
         let data = ColdRebootData {
-            resume_data: map,
+            resume_data,
             guild_chunks,
             user_chunks,
             member_chunks,
@@ -518,14 +503,11 @@ impl InMemoryCache {
             role_chunks,
         };
 
+        let bytes = serde_json::to_vec(&data).unwrap();
         let mut connection = redis.get().await;
 
         let data_result = connection
-            .set_and_expire_seconds(
-                "cb_cluster_data",
-                &serde_json::to_value(data).unwrap().to_string().into_bytes(),
-                STORE_DURATION,
-            )
+            .set_and_expire_seconds("cb_cluster_data", bytes, STORE_DURATION)
             .await;
 
         if let Err(why) = data_result {
