@@ -157,19 +157,10 @@ impl InMemoryCache {
             .map(Either::Right);
         defrost_futs.extend(user_defrosters);
 
-        // --- Members ---
-        let member_defrosters = (0..reboot_data.member_chunks)
-            .map(|i| self.defrost_members(redis, i).map_err(|e| ("members", e)))
-            .map(Either::Left)
-            .map(Either::Right)
-            .map(Either::Right);
-        defrost_futs.extend(member_defrosters);
-
         // --- Channels ---
         let channel_defrosters = (0..reboot_data.channel_chunks)
             .map(|i| self.defrost_channels(redis, i).map_err(|e| ("channels", e)))
             .map(Either::Left)
-            .map(Either::Right)
             .map(Either::Right)
             .map(Either::Right);
         defrost_futs.extend(channel_defrosters);
@@ -180,7 +171,6 @@ impl InMemoryCache {
             .map(Either::Left)
             .map(Either::Right)
             .map(Either::Right)
-            .map(Either::Right)
             .map(Either::Right);
         defrost_futs.extend(role_defrosters);
 
@@ -189,11 +179,18 @@ impl InMemoryCache {
             .defrost_current_user(redis)
             .map_err(|e| ("current_user", e));
         let current_user_defroster = Either::Right(Either::Right(Either::Right(Either::Right(
-            Either::Right(current_user_defroster),
+            current_user_defroster,
         ))));
         defrost_futs.push(current_user_defroster);
 
         while defrost_futs.next().await.transpose()?.is_some() {}
+
+        // --- Members --- | Needs to happen after _all_ user defrosts
+        let mut member_defrosters: FuturesUnordered<_> = (0..reboot_data.member_chunks)
+            .map(|i| self.defrost_members(redis, i).map_err(|e| ("members", e)))
+            .collect();
+
+        while member_defrosters.next().await.transpose()?.is_some() {}
 
         debug!(
             "Cache defrosting complete:\n\
