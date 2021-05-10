@@ -336,6 +336,7 @@ impl UpdateCache for MessageCreate {
         }
 
         let message_cache_size = cache.0.config.message_cache_size();
+
         let mut channel = cache
             .0
             .messages
@@ -344,13 +345,13 @@ impl UpdateCache for MessageCreate {
 
         if channel.len() > message_cache_size {
             channel.value_mut().pop_back();
-        } else {
-            cache
-                .0
-                .metrics
-                .messages
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
+
+        cache
+            .0
+            .metrics
+            .messages
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         channel.push_front(Arc::new(From::from(self.0.clone())));
 
@@ -359,13 +360,16 @@ impl UpdateCache for MessageCreate {
         } else {
             let user = Arc::new(self.0.author.to_owned());
             let mut guild_id_set = BTreeSet::new();
+
             if let Some(guild_id) = self.0.guild_id {
                 guild_id_set.insert(guild_id);
             }
+
             cache
                 .0
                 .users
                 .insert(user.id, (Arc::clone(&user), guild_id_set));
+
             user
         };
 
@@ -386,6 +390,7 @@ impl UpdateCache for MessageDelete {
             .messages
             .entry(self.channel_id)
             .or_insert_with(|| VecDeque::with_capacity(cache.0.config.message_cache_size()));
+
         if let Some(idx) = channel.iter().position(|msg| msg.id == self.id) {
             channel.value_mut().remove(idx);
         }
@@ -854,6 +859,7 @@ mod tests {
             members: Vec::new(),
             mfa_level: MfaLevel::None,
             name: "test".to_owned(),
+            nsfw: false,
             owner_id: UserId(1),
             owner: None,
             permissions: None,
@@ -895,6 +901,7 @@ mod tests {
             member_count: guild.member_count,
             mfa_level: guild.mfa_level,
             name: "test2222".to_owned(),
+            nsfw: guild.nsfw,
             owner_id: UserId(2),
             owner: guild.owner,
             permissions: guild.permissions,

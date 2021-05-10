@@ -358,6 +358,7 @@ impl InMemoryCache {
     /// Gets the latest message by channel ID that returns `Some` through the given function.
     ///
     /// This is an O(n) operation. This requires one or both of the
+    /// [`GUILD_MESSAGES`] or [`DIRECT_MESSAGES`] intents.
     ///
     /// [`GUILD_MESSAGES`]: ::twilight_model::gateway::Intents::GUILD_MESSAGES
     /// [`DIRECT_MESSAGES`]: ::twilight_model::gateway::Intents::DIRECT_MESSAGES
@@ -486,6 +487,9 @@ impl InMemoryCache {
                 c.guild_id.replace(guild_id);
             }
             GuildChannel::Voice(ref mut c) => {
+                c.guild_id.replace(guild_id);
+            }
+            GuildChannel::Stage(ref mut c) => {
                 c.guild_id.replace(guild_id);
             }
         }
@@ -1034,6 +1038,7 @@ mod tests {
             members: Vec::new(),
             mfa_level: MfaLevel::Elevated,
             name: "this is a guild".to_owned(),
+            nsfw: false,
             owner: Some(false),
             owner_id: UserId(456),
             permissions: Some(Permissions::SEND_MESSAGES),

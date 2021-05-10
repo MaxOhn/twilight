@@ -12,6 +12,7 @@ mod private_channel;
 mod reaction;
 mod reaction_type;
 mod text_channel;
+mod video_quality_mode;
 mod voice_channel;
 mod webhook;
 mod webhook_type;
@@ -20,8 +21,8 @@ pub use self::{
     attachment::Attachment, category_channel::CategoryChannel, channel_mention::ChannelMention,
     channel_type::ChannelType, followed_channel::FollowedChannel, group::Group, message::Message,
     private_channel::PrivateChannel, reaction::Reaction, reaction_type::ReactionType,
-    text_channel::TextChannel, voice_channel::VoiceChannel, webhook::Webhook,
-    webhook_type::WebhookType,
+    text_channel::TextChannel, video_quality_mode::VideoQualityMode, voice_channel::VoiceChannel,
+    webhook::Webhook, webhook_type::WebhookType,
 };
 
 use crate::id::{ChannelId, GuildId, MessageId};
@@ -84,6 +85,7 @@ pub enum GuildChannel {
     Category(CategoryChannel),
     Text(TextChannel),
     Voice(VoiceChannel),
+    Stage(VoiceChannel),
 }
 
 impl GuildChannel {
@@ -93,6 +95,7 @@ impl GuildChannel {
             Self::Category(category) => category.guild_id,
             Self::Text(text) => text.guild_id,
             Self::Voice(voice) => voice.guild_id,
+            Self::Stage(stage) => stage.guild_id,
         }
     }
 
@@ -102,6 +105,7 @@ impl GuildChannel {
             Self::Category(category) => category.id,
             Self::Text(text) => text.id,
             Self::Voice(voice) => voice.id,
+            Self::Stage(stage) => stage.id,
         }
     }
 
@@ -111,6 +115,7 @@ impl GuildChannel {
             Self::Category(category) => category.name.as_ref(),
             Self::Text(text) => text.name.as_ref(),
             Self::Voice(voice) => voice.name.as_ref(),
+            Self::Stage(stage) => stage.name.as_ref(),
         }
     }
 }
@@ -132,6 +137,7 @@ enum GuildChannelField {
     Topic,
     Type,
     UserLimit,
+    VideoQualityMode,
 }
 
 struct GuildChannelVisitor;
@@ -167,6 +173,7 @@ impl<'de> Visitor<'de> for GuildChannelVisitor {
         let mut rate_limit_per_user = None;
         let mut topic: Option<Option<String>> = None;
         let mut user_limit = None;
+        let mut video_quality_mode = None;
 
         let span = tracing::trace_span!("deserializing guild channel");
         let _span_enter = span.enter();
@@ -275,7 +282,7 @@ impl<'de> Visitor<'de> for GuildChannelVisitor {
                         return Err(DeError::duplicate_field("rate_limit_per_user"));
                     }
 
-                    rate_limit_per_user = Some(map.next_value()?);
+                    rate_limit_per_user = map.next_value::<Option<u64>>()?;
                 }
                 GuildChannelField::Topic => {
                     if topic.is_some() {
@@ -290,6 +297,13 @@ impl<'de> Visitor<'de> for GuildChannelVisitor {
                     }
 
                     user_limit = Some(map.next_value()?);
+                }
+                GuildChannelField::VideoQualityMode => {
+                    if video_quality_mode.is_some() {
+                        return Err(DeError::duplicate_field("video_quality_mode"));
+                    }
+
+                    video_quality_mode = Some(map.next_value()?);
                 }
             }
         }
@@ -335,18 +349,25 @@ impl<'de> Visitor<'de> for GuildChannelVisitor {
                 let user_limit = user_limit.ok_or_else(|| DeError::missing_field("user_limit"))?;
 
                 tracing::trace!(%bitrate, ?user_limit, "handling voice channel");
-
-                GuildChannel::Voice(VoiceChannel {
+                let voice_channel = VoiceChannel {
+                    id,
                     bitrate,
                     guild_id,
-                    id,
                     kind,
                     name,
                     parent_id,
                     permission_overwrites,
                     position,
+                    rtc_region: None,
                     user_limit,
-                })
+                    video_quality_mode,
+                };
+
+                if kind == ChannelType::GuildVoice {
+                    GuildChannel::Voice(voice_channel)
+                } else {
+                    GuildChannel::Stage(voice_channel)
+                }
             }
             ChannelType::GuildNews | ChannelType::GuildStore | ChannelType::GuildText => {
                 let last_message_id = last_message_id.unwrap_or_default();
@@ -449,7 +470,25 @@ mod tests {
             permission_overwrites: Vec::new(),
             parent_id: None,
             position: 2,
+            rtc_region: None,
             user_limit: None,
+            video_quality_mode: None,
+        }
+    }
+
+    fn guild_stage() -> VoiceChannel {
+        VoiceChannel {
+            bitrate: 1000,
+            guild_id: Some(GuildId(321)),
+            id: ChannelId(789),
+            kind: ChannelType::GuildStageVoice,
+            name: "stage".to_owned(),
+            permission_overwrites: Vec::new(),
+            parent_id: None,
+            position: 2,
+            rtc_region: None,
+            user_limit: None,
+            video_quality_mode: None,
         }
     }
 
@@ -478,6 +517,10 @@ mod tests {
             Channel::Guild(GuildChannel::Voice(guild_voice())).id(),
             ChannelId(789)
         );
+        assert_eq!(
+            Channel::Guild(GuildChannel::Stage(guild_stage())).id(),
+            ChannelId(789)
+        );
         assert_eq!(Channel::Private(private()).id(), ChannelId(234));
     }
 
@@ -499,6 +542,10 @@ mod tests {
             Channel::Guild(GuildChannel::Voice(guild_voice())).name(),
             Some("voice")
         );
+        assert_eq!(
+            Channel::Guild(GuildChannel::Stage(guild_stage())).name(),
+            Some("stage")
+        );
         assert!(Channel::Private(private()).name().is_none());
     }
 
@@ -516,6 +563,10 @@ mod tests {
             GuildChannel::Voice(guild_voice()).guild_id(),
             Some(GuildId(321))
         );
+        assert_eq!(
+            GuildChannel::Stage(guild_stage()).guild_id(),
+            Some(GuildId(321))
+        );
     }
 
     #[test]
@@ -526,6 +577,7 @@ mod tests {
         );
         assert_eq!(GuildChannel::Text(guild_text()).id(), ChannelId(456));
         assert_eq!(GuildChannel::Voice(guild_voice()).id(), ChannelId(789));
+        assert_eq!(GuildChannel::Stage(guild_stage()).id(), ChannelId(789));
     }
 
     #[test]
@@ -533,6 +585,7 @@ mod tests {
         assert_eq!(GuildChannel::Category(guild_category()).name(), "category");
         assert_eq!(GuildChannel::Text(guild_text()).name(), "text");
         assert_eq!(GuildChannel::Voice(guild_voice()).name(), "voice");
+        assert_eq!(GuildChannel::Stage(guild_stage()).name(), "stage");
     }
 
     // The deserializer for GuildChannel should skip over fields names that
