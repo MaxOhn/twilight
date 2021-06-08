@@ -17,6 +17,8 @@ pub struct CachedGuild {
     #[serde(rename = "e")]
     pub name: String,
     pub owner_id: UserId,
+    #[serde(rename = "f", default, skip_serializing_if = "Option::is_none")]
+    pub joined_at: Option<String>,
     #[serde(rename = "g", default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<Permissions>,
     #[serde(rename = "h", default, skip_serializing_if = "Option::is_none")]
