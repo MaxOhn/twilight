@@ -1,21 +1,32 @@
-use serde::Serialize;
+use super::is_false;
+
+use serde::{Deserialize, Serialize};
 use twilight_model::{
     application::interaction::application_command::InteractionMember,
     guild::{Member, PartialMember},
     id::{GuildId, RoleId, UserId},
 };
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CachedMember {
+    #[serde(default, rename = "a", skip_serializing_if = "Option::is_none")]
     pub deaf: Option<bool>,
+    #[serde(rename = "b")]
     pub guild_id: GuildId,
+    #[serde(default, rename = "c", skip_serializing_if = "Option::is_none")]
     pub joined_at: Option<String>,
+    #[serde(default, rename = "d", skip_serializing_if = "Option::is_none")]
     pub mute: Option<bool>,
+    #[serde(default, rename = "e", skip_serializing_if = "Option::is_none")]
     pub nick: Option<String>,
+    #[serde(default, rename = "f", skip_serializing_if = "is_false")]
     pub pending: bool,
+    #[serde(default, rename = "g", skip_serializing_if = "Option::is_none")]
     pub premium_since: Option<String>,
+    #[serde(default, rename = "h", skip_serializing_if = "Vec::is_empty")]
     pub roles: Vec<RoleId>,
     /// ID of the user relating to the member.
+    #[serde(rename = "i")]
     pub user_id: UserId,
 }
 
@@ -165,5 +176,14 @@ mod tests {
         };
 
         assert_eq!(cached_member(), &member);
+    }
+
+    #[test]
+    fn serde() {
+        let member = cached_member();
+        let serialized = serde_json::to_vec(&member).unwrap();
+        let deserialized: CachedMember = serde_json::from_slice(&serialized).unwrap();
+
+        assert_eq!(member, deserialized);
     }
 }

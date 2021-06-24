@@ -58,6 +58,7 @@ pub mod model;
 mod builder;
 mod config;
 mod event;
+mod redis;
 mod stats;
 
 #[cfg(test)]
