@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use twilight_model::{
     channel::{Channel, Group, GuildChannel, PrivateChannel},
     gateway::payload::{ChannelCreate, ChannelDelete, ChannelPinsUpdate, ChannelUpdate},
-    id::{ChannelId, GuildId},
+    id::{ChannelId, GuildId, UserId},
 };
 
 impl InMemoryCache {
@@ -41,8 +41,8 @@ impl InMemoryCache {
     /// This is an O(1) operation. This requires the [`DIRECT_MESSAGES`] intent.
     ///
     /// [`DIRECT_MESSAGES`]: ::twilight_model::gateway::Intents::DIRECT_MESSAGES
-    pub fn private_channel(&self, channel_id: ChannelId) -> Option<PrivateChannel> {
-        self.0.channels_private.get(&channel_id).map(|r| r.clone())
+    pub fn private_channel(&self, user_id: UserId) -> Option<PrivateChannel> {
+        self.0.channels_private.get(&user_id).map(|r| r.clone())
     }
 
     pub(crate) fn cache_guild_channels(
@@ -85,10 +85,10 @@ impl InMemoryCache {
         crate::upsert_item(&self.0.groups, group.id, group)
     }
 
-    fn cache_private_channel(&self, private_channel: PrivateChannel) {
-        self.0
-            .channels_private
-            .insert(private_channel.id, private_channel);
+    pub fn cache_private_channel(&self, private_channel: PrivateChannel) {
+        if let Some(user) = private_channel.recipients.iter().find(|user| !user.bot) {
+            self.0.channels_private.insert(user.id, private_channel);
+        }
     }
 
     /// Delete a guild channel from the cache.
@@ -144,7 +144,9 @@ impl UpdateCache for ChannelDelete {
                 cache.delete_guild_channel(c.id());
             }
             Channel::Private(ref c) => {
-                cache.0.channels_private.remove(&c.id);
+                if let Some(user) = c.recipients.iter().find(|user| !user.bot) {
+                    cache.0.channels_private.remove(&user.id);
+                }
             }
         }
     }
@@ -166,11 +168,7 @@ impl UpdateCache for ChannelPinsUpdate {
             return;
         }
 
-        if let Some(mut channel) = cache.0.channels_private.get_mut(&self.channel_id) {
-            channel.last_pin_timestamp = self.last_pin_timestamp.clone();
-
-            return;
-        }
+        // Note: Pins in private channels are not cached
 
         if let Some(mut group) = cache.0.groups.get_mut(&self.channel_id) {
             group.last_pin_timestamp = self.last_pin_timestamp.clone();

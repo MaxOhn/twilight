@@ -126,7 +126,7 @@ fn upsert_item<K: Eq + Hash, V: PartialEq>(map: &DashMap<K, V>, k: K, v: V) {
 struct InMemoryCacheRef {
     config: Config,
     channels_guild: DashMap<ChannelId, GuildItem<GuildChannel>>,
-    channels_private: DashMap<ChannelId, PrivateChannel>,
+    channels_private: DashMap<UserId, PrivateChannel>,
     // So long as the lock isn't held across await or panic points this is fine.
     current_user: Mutex<Option<CurrentUser>>,
     emojis: DashMap<EmojiId, GuildItem<CachedEmoji>>,
