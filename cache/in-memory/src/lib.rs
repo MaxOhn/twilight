@@ -82,7 +82,7 @@ use twilight_model::{
     channel::{Group, GuildChannel, PrivateChannel, StageInstance},
     gateway::event::Event,
     guild::{GuildIntegration, Role},
-    id::{ChannelId, EmojiId, GuildId, IntegrationId, RoleId, StageId, UserId},
+    id::{ChannelId, EmojiId, GuildId, IntegrationId, MessageId, RoleId, StageId, UserId},
     user::{CurrentUser, User},
     voice::VoiceState,
 };
@@ -292,6 +292,30 @@ impl InMemoryCache {
     /// processed.
     fn wants(&self, resource_type: ResourceType) -> bool {
         self.0.config.resource_types().contains(resource_type)
+    }
+
+    /// Return the message id of the oldest cached message in the given channel
+    pub fn oldest_message(&self, channel: ChannelId) -> Option<MessageId> {
+        let channel = self.0.messages.get(&channel)?;
+
+        channel.back().map(|msg| msg.id).to_owned()
+    }
+
+    /// Gets the most recent message by channel_id that returns `Some` through the given function.
+    ///
+    /// This is an O(n) operation and requires one or both of the
+    /// [`GUILD_MESSAGES`] or [`DIRECT_MESSAGES`] intents.
+    ///
+    /// [`GUILD_MESSAGES`]: ::twilight_model::gateway::Intents::GUILD_MESSAGES
+    /// [`DIRECT_MESSAGES`]: ::twilight_model::gateway::Intents::DIRECT_MESSAGES
+    pub fn message_extract<T>(
+        &self,
+        channel_id: ChannelId,
+        f: impl Fn(&CachedMessage) -> Option<T>,
+    ) -> Option<T> {
+        let channel = self.0.messages.get(&channel_id)?;
+
+        channel.iter().find_map(f)
     }
 }
 
