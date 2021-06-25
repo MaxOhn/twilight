@@ -41,11 +41,13 @@ impl InMemoryCache {
             .insert(role.id);
 
         // Insert the role into the all roles map
-        crate::upsert_guild_item(&self.0.roles, guild_id, role.id, role);
+        upsert_guild_item!(self.0.roles, guild_id, role.id, role, self.0.metrics.roles);
     }
 
     fn delete_role(&self, role_id: RoleId) {
         if let Some((_, role)) = self.0.roles.remove(&role_id) {
+            self.0.metrics.roles.add(-1);
+
             if let Some(mut roles) = self.0.guild_roles.get_mut(&role.guild_id) {
                 roles.remove(&role_id);
             }
@@ -59,11 +61,12 @@ impl UpdateCache for RoleCreate {
             return;
         }
 
-        crate::upsert_guild_item(
-            &cache.0.roles,
+        upsert_guild_item!(
+            cache.0.roles,
             self.guild_id,
             self.role.id,
             self.role.clone(),
+            cache.0.metrics.roles,
         );
     }
 }

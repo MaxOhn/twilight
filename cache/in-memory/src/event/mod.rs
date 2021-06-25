@@ -67,7 +67,10 @@ impl InMemoryCache {
 
                 return;
             }
-            Some(_) | None => {}
+            Some(_) => {}
+            None => {
+                self.0.metrics.users.add(1);
+            }
         }
         let user = user.into_owned();
 
@@ -79,8 +82,13 @@ impl InMemoryCache {
     }
 
     fn unavailable_guild(&self, guild_id: GuildId) {
-        self.0.unavailable_guilds.insert(guild_id);
-        self.0.guilds.remove(&guild_id);
+        if self.0.unavailable_guilds.insert(guild_id) {
+            self.0.metrics.unavailable_guilds.add(1);
+        }
+
+        if self.0.guilds.remove(&guild_id).is_some() {
+            self.0.metrics.guilds.add(-1);
+        }
     }
 }
 
@@ -104,8 +112,13 @@ impl UpdateCache for UnavailableGuild {
             return;
         }
 
-        cache.0.guilds.remove(&self.id);
-        cache.0.unavailable_guilds.insert(self.id);
+        if cache.0.guilds.remove(&self.id).is_some() {
+            cache.0.metrics.guilds.add(-1);
+        }
+
+        if cache.0.unavailable_guilds.insert(self.id) {
+            cache.0.metrics.unavailable_guilds.add(1);
+        }
     }
 }
 

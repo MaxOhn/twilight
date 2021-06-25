@@ -49,8 +49,8 @@ impl InMemoryCache {
             .or_default()
             .insert(stage_instance.id);
 
-        crate::upsert_guild_item(
-            &self.0.stage_instances,
+        upsert_guild_item!(
+            self.0.stage_instances,
             guild_id,
             stage_instance.id,
             stage_instance,

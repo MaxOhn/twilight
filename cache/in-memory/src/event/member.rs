@@ -47,6 +47,8 @@ impl InMemoryCache {
             if *m == member {
                 return;
             }
+        } else {
+            self.0.metrics.members.add(1);
         }
 
         let user_id = member.user.id;
@@ -83,6 +85,8 @@ impl InMemoryCache {
             if *m == member {
                 return;
             }
+        } else {
+            self.0.metrics.members.add(1);
         }
 
         self.0
@@ -115,7 +119,11 @@ impl InMemoryCache {
         let (deaf, mute) = match self.0.members.get(&id) {
             Some(m) if *m == member => return,
             Some(m) => (m.deaf, m.mute),
-            None => (None, None),
+            None => {
+                self.0.metrics.members.add(1);
+
+                (None, None)
+            }
         };
 
         self.0
@@ -179,7 +187,14 @@ impl UpdateCache for MemberRemove {
             return;
         }
 
-        cache.0.members.remove(&(self.guild_id, self.user.id));
+        if cache
+            .0
+            .members
+            .remove(&(self.guild_id, self.user.id))
+            .is_some()
+        {
+            cache.0.metrics.members.add(-1);
+        }
 
         if let Some(mut members) = cache.0.guild_members.get_mut(&self.guild_id) {
             members.remove(&self.user.id);
@@ -191,15 +206,18 @@ impl UpdateCache for MemberRemove {
 
         if let Some(mut user_tuple) = cache.0.users.get_mut(&self.user.id) {
             user_tuple.1.remove(&self.guild_id);
-
             maybe_remove_user = true;
         }
 
         if maybe_remove_user {
-            cache
+            if cache
                 .0
                 .users
-                .remove_if(&self.user.id, |_, guild_set| guild_set.1.is_empty());
+                .remove_if(&self.user.id, |_, guild_set| guild_set.1.is_empty())
+                .is_some()
+            {
+                cache.0.metrics.users.add(-1);
+            }
         }
     }
 }

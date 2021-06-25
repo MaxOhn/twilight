@@ -53,11 +53,61 @@
     warnings
 )]
 
+#[macro_use]
+extern crate log;
+
+macro_rules! upsert_guild_item {
+    ($map:expr, $guild_id:expr, $key:expr, $value:expr $(,)?) => {
+        let key = $key;
+        let value = $value;
+
+        match $map.entry(key) {
+            dashmap::mapref::entry::Entry::Occupied(entry) if entry.get().data == value => {}
+            dashmap::mapref::entry::Entry::Occupied(mut entry) => {
+                entry.insert(crate::GuildItem {
+                    data: value,
+                    guild_id: $guild_id,
+                });
+            }
+            dashmap::mapref::entry::Entry::Vacant(entry) => {
+                entry.insert(crate::GuildItem {
+                    data: value,
+                    guild_id: $guild_id,
+                });
+            }
+        }
+    };
+
+    ($map:expr, $guild_id:expr, $key:expr, $value:expr, $metric:expr $(,)?) => {
+        let key = $key;
+        let value = $value;
+
+        match $map.entry(key) {
+            dashmap::mapref::entry::Entry::Occupied(entry) if entry.get().data == value => {}
+            dashmap::mapref::entry::Entry::Occupied(mut entry) => {
+                entry.insert(crate::GuildItem {
+                    data: value,
+                    guild_id: $guild_id,
+                });
+            }
+            dashmap::mapref::entry::Entry::Vacant(entry) => {
+                $metric.add(1);
+
+                entry.insert(crate::GuildItem {
+                    data: value,
+                    guild_id: $guild_id,
+                });
+            }
+        }
+    };
+}
+
 pub mod model;
 
 mod builder;
 mod config;
 mod event;
+mod metrics;
 mod redis;
 mod stats;
 
@@ -67,11 +117,12 @@ mod test;
 pub use self::{
     builder::InMemoryCacheBuilder,
     config::{Config, ResourceType},
+    metrics::Metrics,
     stats::InMemoryCacheStats,
 };
 
 use self::model::*;
-use dashmap::{mapref::entry::Entry, DashMap, DashSet};
+use dashmap::{DashMap, DashSet};
 use std::{
     collections::{BTreeSet, HashSet, VecDeque},
     hash::Hash,
@@ -91,29 +142,6 @@ use twilight_model::{
 struct GuildItem<T> {
     data: T,
     guild_id: GuildId,
-}
-
-fn upsert_guild_item<K: Eq + Hash, V: PartialEq>(
-    map: &DashMap<K, GuildItem<V>>,
-    guild_id: GuildId,
-    key: K,
-    value: V,
-) {
-    match map.entry(key) {
-        Entry::Occupied(entry) if entry.get().data == value => {}
-        Entry::Occupied(mut entry) => {
-            entry.insert(GuildItem {
-                data: value,
-                guild_id,
-            });
-        }
-        Entry::Vacant(entry) => {
-            entry.insert(GuildItem {
-                data: value,
-                guild_id,
-            });
-        }
-    }
 }
 
 fn upsert_item<K: Eq + Hash, V: PartialEq>(map: &DashMap<K, V>, k: K, v: V) {
@@ -142,6 +170,7 @@ struct InMemoryCacheRef {
     integrations: DashMap<(GuildId, IntegrationId), GuildItem<GuildIntegration>>,
     members: DashMap<(GuildId, UserId), CachedMember>,
     messages: DashMap<ChannelId, VecDeque<CachedMessage>>,
+    metrics: Arc<Metrics>,
     presences: DashMap<(GuildId, UserId), CachedPresence>,
     roles: DashMap<RoleId, GuildItem<Role>>,
     stage_instances: DashMap<StageId, GuildItem<StageInstance>>,
@@ -316,6 +345,10 @@ impl InMemoryCache {
         let channel = self.0.messages.get(&channel_id)?;
 
         channel.iter().find_map(f)
+    }
+
+    pub fn metrics(&self) -> Arc<Metrics> {
+        Arc::clone(&self.0.metrics)
     }
 }
 

@@ -44,6 +44,8 @@ impl UpdateCache for MessageCreate {
             channel.pop_back();
         }
 
+        cache.0.metrics.messages.add(1);
+
         channel.push_front(CachedMessage::from(self.0.clone()));
     }
 }
@@ -58,6 +60,7 @@ impl UpdateCache for MessageDelete {
 
         if let Some(idx) = channel.iter().position(|msg| msg.id == self.id) {
             channel.remove(idx);
+            cache.0.metrics.messages.add(-1);
         }
     }
 }
@@ -73,6 +76,7 @@ impl UpdateCache for MessageDeleteBulk {
         for id in &self.ids {
             if let Some(idx) = channel.iter().position(|msg| &msg.id == id) {
                 channel.remove(idx);
+                cache.0.metrics.messages.add(-1);
             }
         }
     }

@@ -17,7 +17,6 @@ use std::{
     time::Instant,
     u64,
 };
-use tracing::{debug, error, info, warn};
 use twilight_model::{
     channel::GuildChannel,
     guild::Role,
@@ -103,6 +102,17 @@ impl InMemoryCache {
 
                 cache.clear();
             } else {
+                cache
+                    .0
+                    .metrics
+                    .channels_guild
+                    .add(cache.0.channels_guild.len() as i64);
+
+                cache.0.metrics.guilds.add(cache.0.guilds.len() as i64);
+                cache.0.metrics.members.add(cache.0.members.len() as i64);
+                cache.0.metrics.roles.add(cache.0.roles.len() as i64);
+                cache.0.metrics.users.add(cache.0.users.len() as i64);
+
                 debug!("Cold resume defrosting completed in {:?}", start.elapsed());
             }
 

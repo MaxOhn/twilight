@@ -78,7 +78,13 @@ impl InMemoryCache {
             .or_default()
             .insert(id);
 
-        crate::upsert_guild_item(&self.0.channels_guild, guild_id, id, channel);
+        upsert_guild_item!(
+            self.0.channels_guild,
+            guild_id,
+            id,
+            channel,
+            self.0.metrics.channels_guild,
+        );
     }
 
     fn cache_group(&self, group: Group) {
@@ -87,7 +93,14 @@ impl InMemoryCache {
 
     pub fn cache_private_channel(&self, private_channel: PrivateChannel) {
         if let Some(user) = private_channel.recipients.iter().find(|user| !user.bot) {
-            self.0.channels_private.insert(user.id, private_channel);
+            if self
+                .0
+                .channels_private
+                .insert(user.id, private_channel)
+                .is_none()
+            {
+                self.0.metrics.channels_private.add(1);
+            }
         }
     }
 
@@ -97,6 +110,8 @@ impl InMemoryCache {
     /// of channels will be deleted.
     fn delete_guild_channel(&self, channel_id: ChannelId) {
         if let Some((_, item)) = self.0.channels_guild.remove(&channel_id) {
+            self.0.metrics.channels_guild.add(-1);
+
             if let Some(mut guild_channels) = self.0.guild_channels.get_mut(&item.guild_id) {
                 guild_channels.remove(&channel_id);
             }
@@ -145,7 +160,9 @@ impl UpdateCache for ChannelDelete {
             }
             Channel::Private(ref c) => {
                 if let Some(user) = c.recipients.iter().find(|user| !user.bot) {
-                    cache.0.channels_private.remove(&user.id);
+                    if cache.0.channels_private.remove(&user.id).is_some() {
+                        cache.0.metrics.channels_private.add(-1);
+                    }
                 }
             }
         }

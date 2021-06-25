@@ -13,8 +13,8 @@ impl InMemoryCache {
             .or_default()
             .insert(integration.id);
 
-        crate::upsert_guild_item(
-            &self.0.integrations,
+        upsert_guild_item!(
+            self.0.integrations,
             guild_id,
             (guild_id, integration.id),
             integration,
@@ -42,8 +42,8 @@ impl UpdateCache for IntegrationCreate {
         }
 
         if let Some(guild_id) = self.guild_id {
-            crate::upsert_guild_item(
-                &cache.0.integrations,
+            upsert_guild_item!(
+                cache.0.integrations,
                 guild_id,
                 (guild_id, self.id),
                 self.0.clone(),

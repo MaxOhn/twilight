@@ -3,8 +3,7 @@ use crate::{
     model::{CachedGuild, CachedPresence},
     InMemoryCache, UpdateCache,
 };
-use dashmap::DashMap;
-use std::{collections::HashSet, hash::Hash};
+use std::collections::HashSet;
 use twilight_model::{
     gateway::payload::{GuildCreate, GuildDelete, GuildUpdate},
     guild::Guild,
@@ -26,6 +25,12 @@ impl InMemoryCache {
         // objects always has a place to put them.
         if self.wants(ResourceType::CHANNEL) {
             self.0.guild_channels.insert(guild.id, HashSet::new());
+
+            self.0
+                .metrics
+                .channels_guild
+                .add(guild.channels.len() as i64);
+
             self.cache_guild_channels(guild.id, guild.channels);
         }
 
@@ -101,8 +106,13 @@ impl InMemoryCache {
             widget_enabled: guild.widget_enabled,
         };
 
-        self.0.unavailable_guilds.remove(&guild.id);
-        self.0.guilds.insert(guild.id, guild);
+        if self.0.unavailable_guilds.remove(&guild.id).is_some() {
+            self.0.metrics.unavailable_guilds.add(-1);
+        }
+
+        if self.0.guilds.insert(guild.id, guild).is_none() {
+            self.0.metrics.guilds.add(1);
+        }
     }
 }
 
@@ -118,36 +128,40 @@ impl UpdateCache for GuildCreate {
 
 impl UpdateCache for GuildDelete {
     fn update(&self, cache: &InMemoryCache) {
-        fn remove_ids<T: Eq + Hash, U>(
-            guild_map: &DashMap<GuildId, HashSet<T>>,
-            container: &DashMap<T, U>,
-            guild_id: GuildId,
-        ) {
-            if let Some((_, ids)) = guild_map.remove(&guild_id) {
-                for id in ids {
-                    container.remove(&id);
-                }
-            }
-        }
-
         if !cache.wants(ResourceType::GUILD) {
             return;
         }
 
         let id = self.id;
 
-        cache.0.guilds.remove(&id);
+        if cache.0.guilds.remove(&id).is_some() {
+            cache.0.metrics.guilds.add(-1);
+        }
 
         if cache.wants(ResourceType::CHANNEL) {
-            remove_ids(&cache.0.guild_channels, &cache.0.channels_guild, id);
+            if let Some((_, ids)) = cache.0.guild_channels.remove(&id) {
+                for id in ids {
+                    if cache.0.channels_guild.remove(&id).is_some() {
+                        cache.0.metrics.channels_guild.add(-1);
+                    }
+                }
+            }
         }
 
         if cache.wants(ResourceType::EMOJI) {
-            remove_ids(&cache.0.guild_emojis, &cache.0.emojis, id);
+            if let Some((_, ids)) = cache.0.guild_emojis.remove(&id) {
+                for id in ids {
+                    cache.0.emojis.remove(&id);
+                }
+            }
         }
 
         if cache.wants(ResourceType::ROLE) {
-            remove_ids(&cache.0.guild_roles, &cache.0.roles, id);
+            if let Some((_, ids)) = cache.0.guild_roles.remove(&id) {
+                for id in ids {
+                    cache.0.roles.remove(&id);
+                }
+            }
         }
 
         if cache.wants(ResourceType::VOICE_STATE) {
@@ -158,7 +172,9 @@ impl UpdateCache for GuildDelete {
         if cache.wants(ResourceType::MEMBER) {
             if let Some((_, ids)) = cache.0.guild_members.remove(&id) {
                 for user_id in ids {
-                    cache.0.members.remove(&(id, user_id));
+                    if cache.0.members.remove(&(id, user_id)).is_some() {
+                        cache.0.metrics.members.add(-1);
+                    }
                 }
             }
         }
