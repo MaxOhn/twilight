@@ -138,6 +138,10 @@ impl UpdateCache for GuildDelete {
             cache.0.metrics.guilds.add(-1);
         }
 
+        if cache.0.unavailable_guilds.remove(&id).is_some() {
+            cache.0.metrics.unavailable_guilds.add(-1);
+        }
+
         if cache.wants(ResourceType::CHANNEL) {
             if let Some((_, ids)) = cache.0.guild_channels.remove(&id) {
                 for id in ids {
