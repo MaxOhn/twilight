@@ -42,9 +42,9 @@ impl UpdateCache for MessageCreate {
 
         if channel.len() > cache.0.config.message_cache_size() {
             channel.pop_back();
+        } else {
+            cache.0.metrics.messages.add(1);
         }
-
-        cache.0.metrics.messages.add(1);
 
         channel.push_front(CachedMessage::from(self.0.clone()));
     }
