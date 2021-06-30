@@ -25,7 +25,15 @@ use twilight_model::{
 
 type ResumeSession = (String, u64);
 
-const STORE_DURATION: u32 = 180; // seconds
+const STORE_DURATION: u32 = 240; // seconds
+
+const DATA_KEY: &str = "cb_data";
+const GUILD_KEY_PREFIX: &str = "cb_guild_chunk";
+const USER_KEY_PREFIX: &str = "cb_user_chunk";
+const MEMBER_KEY_PREFIX: &str = "cb_member_chunk";
+const CHANNEL_KEY_PREFIX: &str = "cb_channel_chunk";
+const ROLE_KEY_PREFIX: &str = "cb_role_chunk";
+const CURRENT_USER_KEY: &str = "cb_current_user";
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct ColdRebootData {
@@ -41,6 +49,7 @@ pub type DefrostResult<T> = Result<T, DefrostError>;
 
 #[derive(Debug)]
 pub enum DefrostError {
+    MissingKey(String),
     Redis(RedisError),
     Serde(SerdeError),
 }
@@ -48,6 +57,7 @@ pub enum DefrostError {
 impl Error for DefrostError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::MissingKey(_) => None,
             Self::Redis(source) => Some(source),
             Self::Serde(source) => Some(source),
         }
@@ -57,6 +67,7 @@ impl Error for DefrostError {
 impl fmt::Display for DefrostError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::MissingKey(key) => write!(f, "missing redis key `{}`", key),
             Self::Redis(_) => f.write_str("redis error"),
             Self::Serde(_) => f.write_str("serde error"),
         }
@@ -82,7 +93,7 @@ impl InMemoryCache {
     ) -> (Self, Option<HashMap<u64, ResumeSession>>) {
         let cache = Self::new_with_config(config);
         let mut connection = redis.get().await;
-        let key = "cb_cluster_data";
+        let key = DATA_KEY;
 
         if let Some(data) = connection.get(key).await.ok().flatten() {
             let mut cold_cache: ColdRebootData = serde_json::from_slice(&data).unwrap();
@@ -220,17 +231,21 @@ impl InMemoryCache {
     }
 
     async fn defrost_guilds(&self, redis: &ConnectionPool, index: usize) -> DefrostResult<()> {
-        let key = format!("cb_cluster_guild_chunk_{}", index);
+        let key = format!("{}_{}", GUILD_KEY_PREFIX, index);
         let mut connection = redis.get().await;
 
-        let data = connection
-            .get(&key)
-            .await?
-            .unwrap_or_else(|| panic!("missing redis key `{}`", key));
+        let data = match connection.get(&key).await? {
+            Some(data) => data,
+            None => return Err(DefrostError::MissingKey(key)),
+        };
 
         let guilds: Vec<CachedGuild> = serde_json::from_slice(&data)?;
         connection.del(key).await?;
-        debug!("Worker {} found {} guilds to defrost", index, guilds.len());
+        debug!(
+            "Guild worker {} found {} guilds to defrost",
+            index,
+            guilds.len()
+        );
 
         for guild in guilds {
             self.0.guilds.insert(guild.id, guild);
@@ -240,17 +255,21 @@ impl InMemoryCache {
     }
 
     async fn defrost_users(&self, redis: &ConnectionPool, index: usize) -> DefrostResult<()> {
-        let key = format!("cb_cluster_user_chunk_{}", index);
+        let key = format!("{}_{}", USER_KEY_PREFIX, index);
         let mut connection = redis.get().await;
 
-        let data = connection
-            .get(&key)
-            .await?
-            .unwrap_or_else(|| panic!("missing redis key `{}`", key));
+        let data = match connection.get(&key).await? {
+            Some(data) => data,
+            None => return Err(DefrostError::MissingKey(key)),
+        };
 
         let users: Vec<ColdStorageUser> = serde_json::from_slice(&data)?;
         connection.del(key).await?;
-        debug!("Worker {} found {} users to defrost", index, users.len());
+        debug!(
+            "User worker {} found {} users to defrost",
+            index,
+            users.len()
+        );
 
         for user in users {
             let (user, guilds) = user.into();
@@ -261,19 +280,19 @@ impl InMemoryCache {
     }
 
     async fn defrost_members(&self, redis: &ConnectionPool, index: usize) -> DefrostResult<()> {
-        let key = format!("cb_cluster_member_chunk_{}", index);
+        let key = format!("{}_{}", MEMBER_KEY_PREFIX, index);
         let mut connection = redis.get().await;
 
-        let data = connection
-            .get(&key)
-            .await?
-            .unwrap_or_else(|| panic!("missing redis key `{}`", key));
+        let data = match connection.get(&key).await? {
+            Some(data) => data,
+            None => return Err(DefrostError::MissingKey(key)),
+        };
 
         let members: Vec<CachedMember> = serde_json::from_slice(&data)?;
         connection.del(key).await?;
 
         debug!(
-            "Worker {} found {} members to defrost",
+            "Member worker {} found {} members to defrost",
             index,
             members.len()
         );
@@ -294,19 +313,19 @@ impl InMemoryCache {
     }
 
     async fn defrost_channels(&self, redis: &ConnectionPool, index: usize) -> DefrostResult<()> {
-        let key = format!("cb_cluster_channel_chunk_{}", index);
+        let key = format!("{}_{}", CHANNEL_KEY_PREFIX, index);
         let mut connection = redis.get().await;
 
-        let data = connection
-            .get(&key)
-            .await?
-            .unwrap_or_else(|| panic!("missing redis key `{}`", key));
+        let data = match connection.get(&key).await? {
+            Some(data) => data,
+            None => return Err(DefrostError::MissingKey(key)),
+        };
 
         let channels: Vec<ColdStorageTextChannel> = serde_json::from_slice(&data)?;
         connection.del(key).await?;
 
         debug!(
-            "Worker {} found {} textchannels to defrost",
+            "Channel worker {} found {} textchannels to defrost",
             index,
             channels.len()
         );
@@ -325,17 +344,21 @@ impl InMemoryCache {
     }
 
     async fn defrost_roles(&self, redis: &ConnectionPool, index: usize) -> DefrostResult<()> {
-        let key = format!("cb_cluster_role_chunk_{}", index);
+        let key = format!("{}_{}", ROLE_KEY_PREFIX, index);
         let mut connection = redis.get().await;
 
-        let data = connection
-            .get(&key)
-            .await?
-            .unwrap_or_else(|| panic!("missing redis key `{}`", key));
+        let data = match connection.get(&key).await? {
+            Some(data) => data,
+            None => return Err(DefrostError::MissingKey(key)),
+        };
 
         let roles: Vec<ColdStorageRole> = serde_json::from_slice(&data)?;
         connection.del(key).await?;
-        debug!("Worker {} found {} role to defrost", index, roles.len());
+        debug!(
+            "Role worker {} found {} role to defrost",
+            index,
+            roles.len()
+        );
 
         for role in roles {
             let role: GuildItem<Role> = role.into();
@@ -353,13 +376,13 @@ impl InMemoryCache {
     }
 
     async fn defrost_current_user(&self, redis: &ConnectionPool) -> DefrostResult<()> {
-        let key = "cb_cluster_current_user";
+        let key = CURRENT_USER_KEY;
         let mut connection = redis.get().await;
 
-        let data = connection
-            .get(key)
-            .await?
-            .unwrap_or_else(|| panic!("missing redis key `{}`", key));
+        let data = match connection.get(key).await? {
+            Some(data) => data,
+            None => return Err(DefrostError::MissingKey(key.to_owned())),
+        };
 
         let user = serde_json::from_slice(&data)?;
         connection.del(key).await?;
@@ -388,8 +411,8 @@ impl InMemoryCache {
         let mut prepare_futs = FuturesUnordered::new();
 
         // --- Guilds ---
-        let guild_chunks = self.0.guilds.len() / 100_000 + 1;
-        let mut guild_work_orders = vec![Vec::with_capacity(500); guild_chunks];
+        let guild_chunks = self.0.guilds.len() / 25_000 + 1;
+        let mut guild_work_orders = vec![Vec::with_capacity(10_000); guild_chunks];
 
         for (i, guard) in self.0.guilds.iter().enumerate() {
             guild_work_orders[i % guild_chunks].push(*guard.key());
@@ -480,7 +503,7 @@ impl InMemoryCache {
 
         // --- Roles ---
         let role_chunks = self.0.roles.len() / 100_000 + 1;
-        let mut role_work_orders = vec![Vec::with_capacity(5_000); role_chunks];
+        let mut role_work_orders = vec![Vec::with_capacity(50_000); role_chunks];
 
         for (i, guard) in self.0.roles.iter().enumerate() {
             role_work_orders[i % role_chunks].push(*guard.key());
@@ -526,18 +549,16 @@ impl InMemoryCache {
         let mut connection = redis.get().await;
 
         let data_result = connection
-            .set_and_expire_seconds("cb_cluster_data", bytes, STORE_DURATION)
+            .set_and_expire_seconds(DATA_KEY, bytes, STORE_DURATION)
             .await;
 
         if let Err(why) = data_result {
             warn!("Error while storing cluster data onto redis: {}", why);
         }
 
-        let end = Instant::now();
-
         info!(
-            "Cold resume preparations completed in {}ms",
-            (end - start).as_millis()
+            "Cold resume preparations completed in {:?}",
+            start.elapsed()
         );
     }
 
@@ -562,20 +583,14 @@ impl InMemoryCache {
             .collect();
 
         let serialized = serde_json::to_string(&to_dump).unwrap();
+        let key = format!("{}_{}", GUILD_KEY_PREFIX, index);
 
         let dump_task = connection
-            .set_and_expire_seconds(
-                format!("cb_cluster_guild_chunk_{}", index),
-                serialized,
-                STORE_DURATION,
-            )
+            .set_and_expire_seconds(&key, serialized, STORE_DURATION)
             .await;
 
         if let Err(why) = dump_task {
-            debug!(
-                "Error while setting redis' `cb_cluster_guild_chunk_{}`: {}",
-                index, why
-            );
+            debug!("Error while setting redis' `{}`: {}", key, why);
         }
     }
 
@@ -585,7 +600,7 @@ impl InMemoryCache {
         chunk: Vec<UserId>,
         index: usize,
     ) {
-        debug!("Worker {} freezing {} users", index, chunk.len());
+        debug!("User dumper {} freezing {} users", index, chunk.len());
         let mut connection = redis.get().await;
 
         let users: Vec<_> = chunk
@@ -610,20 +625,14 @@ impl InMemoryCache {
             .collect();
 
         let serialized = serde_json::to_string(&users).unwrap();
+        let key = format!("{}_{}", USER_KEY_PREFIX, index);
 
         let worker_task = connection
-            .set_and_expire_seconds(
-                format!("cb_cluster_user_chunk_{}", index),
-                serialized,
-                STORE_DURATION,
-            )
+            .set_and_expire_seconds(&key, serialized, STORE_DURATION)
             .await;
 
         if let Err(why) = worker_task {
-            debug!(
-                "Error while setting redis' `cb_cluster_user_chunk_{}`: {}",
-                index, why
-            );
+            debug!("Error while setting redis' `{}`: {}", key, why);
         }
     }
 
@@ -634,7 +643,7 @@ impl InMemoryCache {
         index: usize,
     ) {
         debug!(
-            "Guild dumper {} started freezing {} members",
+            "Member dumper {} started freezing {} members",
             index,
             orders.len()
         );
@@ -648,20 +657,14 @@ impl InMemoryCache {
             .collect();
 
         let serialized = serde_json::to_string(&to_dump).unwrap();
+        let key = format!("{}_{}", MEMBER_KEY_PREFIX, index);
 
         let dump_task = connection
-            .set_and_expire_seconds(
-                format!("cb_cluster_member_chunk_{}", index),
-                serialized,
-                STORE_DURATION,
-            )
+            .set_and_expire_seconds(&key, serialized, STORE_DURATION)
             .await;
 
         if let Err(why) = dump_task {
-            debug!(
-                "Error while setting redis' `cb_cluster_member_chunk_{}`: {}",
-                index, why
-            );
+            debug!("Error while setting redis' `{}`: {}", key, why);
         }
     }
 
@@ -672,7 +675,7 @@ impl InMemoryCache {
         index: usize,
     ) {
         debug!(
-            "Guild dumper {} started freezing {} channels",
+            "Channel dumper {} started freezing {} channels",
             index,
             orders.len()
         );
@@ -702,20 +705,14 @@ impl InMemoryCache {
             .collect();
 
         let serialized = serde_json::to_string(&to_dump).unwrap();
+        let key = format!("{}_{}", CHANNEL_KEY_PREFIX, index);
 
         let dump_task = connection
-            .set_and_expire_seconds(
-                format!("cb_cluster_channel_chunk_{}", index),
-                serialized,
-                STORE_DURATION,
-            )
+            .set_and_expire_seconds(&key, serialized, STORE_DURATION)
             .await;
 
         if let Err(why) = dump_task {
-            debug!(
-                "Error while setting redis' `cb_cluster_channel_chunk_{}`: {}",
-                index, why
-            );
+            debug!("Error while setting redis' `{}`: {}", key, why);
         }
     }
 
@@ -726,7 +723,7 @@ impl InMemoryCache {
         index: usize,
     ) {
         debug!(
-            "Guild dumper {} started freezing {} roles",
+            "Role dumper {} started freezing {} roles",
             index,
             orders.len()
         );
@@ -750,20 +747,14 @@ impl InMemoryCache {
             .collect();
 
         let serialized = serde_json::to_string(&to_dump).unwrap();
+        let key = format!("{}_{}", ROLE_KEY_PREFIX, index);
 
         let dump_task = connection
-            .set_and_expire_seconds(
-                format!("cb_cluster_role_chunk_{}", index),
-                serialized,
-                STORE_DURATION,
-            )
+            .set_and_expire_seconds(&key, serialized, STORE_DURATION)
             .await;
 
         if let Err(why) = dump_task {
-            debug!(
-                "Error while setting redis' `cb_cluster_role_chunk_{}`: {}",
-                index, why
-            );
+            debug!("Error while setting redis' `{}`: {}", key, why);
         }
     }
 
@@ -771,16 +762,14 @@ impl InMemoryCache {
         if let Some(user) = self.current_user() {
             let mut connection = redis.get().await;
             let serialized = serde_json::to_string(&user).unwrap();
+            let key = CURRENT_USER_KEY;
 
             let dump_task = connection
-                .set_and_expire_seconds("cb_cluster_current_user", serialized, STORE_DURATION)
+                .set_and_expire_seconds(key, serialized, STORE_DURATION)
                 .await;
 
             if let Err(why) = dump_task {
-                debug!(
-                    "Error while setting redis' `cb_cluster_current_user`: {}",
-                    why
-                );
+                debug!("Error while setting redis' `{}`: {}", key, why);
             }
         }
     }
