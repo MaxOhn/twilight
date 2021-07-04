@@ -181,8 +181,8 @@ mod tests {
     #[test]
     fn serde() {
         let member = cached_member();
-        let serialized = serde_json::to_vec(&member).unwrap();
-        let deserialized: CachedMember = serde_json::from_slice(&serialized).unwrap();
+        let serialized = serde_cbor::to_vec(&member).unwrap();
+        let deserialized: CachedMember = serde_cbor::from_slice(&serialized).unwrap();
 
         assert_eq!(member, deserialized);
     }

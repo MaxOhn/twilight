@@ -9,7 +9,7 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Error as SerdeError;
+use serde_cbor::Error as SerdeError;
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -96,7 +96,7 @@ impl InMemoryCache {
         let key = DATA_KEY;
 
         if let Some(data) = connection.get(key).await.ok().flatten() {
-            let mut cold_cache: ColdRebootData = serde_json::from_slice(&data).unwrap();
+            let mut cold_cache: ColdRebootData = serde_cbor::from_slice(&data).unwrap();
             connection.del(key).await.unwrap();
 
             let mut resume_data = HashMap::new();
@@ -239,7 +239,7 @@ impl InMemoryCache {
             None => return Err(DefrostError::MissingKey(key)),
         };
 
-        let guilds: Vec<CachedGuild> = serde_json::from_slice(&data)?;
+        let guilds: Vec<CachedGuild> = serde_cbor::from_slice(&data)?;
         connection.del(key).await?;
         debug!(
             "Guild worker {} found {} guilds to defrost",
@@ -263,7 +263,7 @@ impl InMemoryCache {
             None => return Err(DefrostError::MissingKey(key)),
         };
 
-        let users: Vec<ColdStorageUser> = serde_json::from_slice(&data)?;
+        let users: Vec<ColdStorageUser> = serde_cbor::from_slice(&data)?;
         connection.del(key).await?;
         debug!(
             "User worker {} found {} users to defrost",
@@ -288,7 +288,7 @@ impl InMemoryCache {
             None => return Err(DefrostError::MissingKey(key)),
         };
 
-        let members: Vec<CachedMember> = serde_json::from_slice(&data)?;
+        let members: Vec<CachedMember> = serde_cbor::from_slice(&data)?;
         connection.del(key).await?;
 
         debug!(
@@ -321,7 +321,7 @@ impl InMemoryCache {
             None => return Err(DefrostError::MissingKey(key)),
         };
 
-        let channels: Vec<ColdStorageTextChannel> = serde_json::from_slice(&data)?;
+        let channels: Vec<ColdStorageTextChannel> = serde_cbor::from_slice(&data)?;
         connection.del(key).await?;
 
         debug!(
@@ -352,7 +352,7 @@ impl InMemoryCache {
             None => return Err(DefrostError::MissingKey(key)),
         };
 
-        let roles: Vec<ColdStorageRole> = serde_json::from_slice(&data)?;
+        let roles: Vec<ColdStorageRole> = serde_cbor::from_slice(&data)?;
         connection.del(key).await?;
         debug!(
             "Role worker {} found {} role to defrost",
@@ -384,7 +384,7 @@ impl InMemoryCache {
             None => return Err(DefrostError::MissingKey(key.to_owned())),
         };
 
-        let user = serde_json::from_slice(&data)?;
+        let user = serde_cbor::from_slice(&data)?;
         connection.del(key).await?;
 
         self.0
@@ -545,7 +545,7 @@ impl InMemoryCache {
             role_chunks,
         };
 
-        let bytes = serde_json::to_vec(&data).unwrap();
+        let bytes = serde_cbor::to_vec(&data).unwrap();
         let mut connection = redis.get().await;
 
         let data_result = connection
@@ -582,7 +582,7 @@ impl InMemoryCache {
             .map(|(_, g)| g)
             .collect();
 
-        let serialized = serde_json::to_string(&to_dump).unwrap();
+        let serialized = serde_cbor::to_vec(&to_dump).unwrap();
         let key = format!("{}_{}", GUILD_KEY_PREFIX, index);
 
         let dump_task = connection
@@ -624,7 +624,7 @@ impl InMemoryCache {
             })
             .collect();
 
-        let serialized = serde_json::to_string(&users).unwrap();
+        let serialized = serde_cbor::to_vec(&users).unwrap();
         let key = format!("{}_{}", USER_KEY_PREFIX, index);
 
         let worker_task = connection
@@ -656,7 +656,7 @@ impl InMemoryCache {
             .map(|(_, g)| g)
             .collect();
 
-        let serialized = serde_json::to_string(&to_dump).unwrap();
+        let serialized = serde_cbor::to_vec(&to_dump).unwrap();
         let key = format!("{}_{}", MEMBER_KEY_PREFIX, index);
 
         let dump_task = connection
@@ -704,7 +704,7 @@ impl InMemoryCache {
             })
             .collect();
 
-        let serialized = serde_json::to_string(&to_dump).unwrap();
+        let serialized = serde_cbor::to_vec(&to_dump).unwrap();
         let key = format!("{}_{}", CHANNEL_KEY_PREFIX, index);
 
         let dump_task = connection
@@ -746,7 +746,7 @@ impl InMemoryCache {
             })
             .collect();
 
-        let serialized = serde_json::to_string(&to_dump).unwrap();
+        let serialized = serde_cbor::to_vec(&to_dump).unwrap();
         let key = format!("{}_{}", ROLE_KEY_PREFIX, index);
 
         let dump_task = connection
@@ -761,7 +761,7 @@ impl InMemoryCache {
     async fn _prepare_cold_resume_current_user(&self, redis: &ConnectionPool) {
         if let Some(user) = self.current_user() {
             let mut connection = redis.get().await;
-            let serialized = serde_json::to_string(&user).unwrap();
+            let serialized = serde_cbor::to_vec(&user).unwrap();
             let key = CURRENT_USER_KEY;
 
             let dump_task = connection
