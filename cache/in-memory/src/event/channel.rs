@@ -52,6 +52,7 @@ impl InMemoryCache {
         crate::upsert_item(&self.0.groups, group.id, group)
     }
 
+    /// Store a private channel into the cache
     pub fn cache_private_channel(&self, private_channel: PrivateChannel) {
         if let Some(user) = private_channel.recipients.iter().find(|user| !user.bot) {
             if self

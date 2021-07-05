@@ -87,6 +87,8 @@ impl From<RedisError> for DefrostError {
 }
 
 impl InMemoryCache {
+    /// Check if the cache was frozen into redis.
+    /// If so, retrieve and use it; otherwise create an empty initial cache
     pub async fn from_redis(
         redis: &ConnectionPool,
         config: Config,
@@ -402,6 +404,7 @@ impl InMemoryCache {
     // ## Freeze cache ##
     // ##################
 
+    /// Dump the cache and its discord sessions into redis
     pub async fn prepare_cold_resume(
         &self,
         redis: &ConnectionPool,

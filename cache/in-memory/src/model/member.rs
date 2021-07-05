@@ -7,22 +7,33 @@ use twilight_model::{
     id::{GuildId, RoleId, UserId},
 };
 
+/// Represents a cached [`Member`].
+///
+/// [`Member`]: twilight_model::guild::Member
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CachedMember {
+    /// Whether the member is deafened in a voice channel.
     #[serde(default, rename = "a", skip_serializing_if = "Option::is_none")]
     pub deaf: Option<bool>,
+    /// ID of the guild this member is a part of.
     #[serde(rename = "b")]
     pub guild_id: GuildId,
+    /// ISO 8601 timestamp of this member's join date.
     #[serde(default, rename = "c", skip_serializing_if = "Option::is_none")]
     pub joined_at: Option<String>,
+    /// Whether the member is muted in a voice channel.
     #[serde(default, rename = "d", skip_serializing_if = "Option::is_none")]
     pub mute: Option<bool>,
+    /// Nickname of the member.
     #[serde(default, rename = "e", skip_serializing_if = "Option::is_none")]
     pub nick: Option<String>,
+    /// Whether the member has not yet passed the guild's Membership Screening requirements.
     #[serde(default, rename = "f", skip_serializing_if = "is_false")]
     pub pending: bool,
+    /// ISO 8601 timestamp of the date the member boosted the guild.
     #[serde(default, rename = "g", skip_serializing_if = "Option::is_none")]
     pub premium_since: Option<String>,
+    /// List of role IDs this member has.
     #[serde(default, rename = "h", skip_serializing_if = "Vec::is_empty")]
     pub roles: Vec<RoleId>,
     /// ID of the user relating to the member.

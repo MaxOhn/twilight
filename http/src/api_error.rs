@@ -66,12 +66,22 @@ pub enum ErrorCode {
     UnknownGiftCode,
     /// Unknown guild template
     UnknownGuildTemplate,
+    /// Unknown discoverable server category
+    UnknownDiscoverableServerCategory,
+    /// Unknown sticker
+    UnknownSticker,
     /// Unknown interaction
     UnknownInteraction,
     /// Unknown application command
     UnknownApplicationCommand,
     /// Unknown application command permissions
     UnknownApplicationCommandPermissions,
+    /// Unknown Stage Instance
+    UnknownStageInstance,
+    /// Unknown Guild Member Verification Form
+    UnknownGuildMemberVerificationForm,
+    /// Unknown Guild Welcome Screen
+    UnknownGuildWelcomeScreen,
     /// Bots cannot use this endpoint
     BotsCannotUseEndpoint,
     /// Only bots can use this endpoint
@@ -116,12 +126,16 @@ pub enum ErrorCode {
     MaximumAnimatedEmojisReached,
     /// Maximum number of server members reached
     MaximumGuildMembersReached,
+    /// Maximum number of server categories has been reached
+    MaximumServerCategoriesReached,
     /// Guild already has a template
     GuildTemplateAlreadyExist,
     /// Maximum number of bans for non-guild members have been exceeded
     MaximumNonGuildBansReached,
     /// Maximum number of bans fetches has been reached
     MaximumGuildBansFetchesReached,
+    /// Maximum number of stickers reached
+    MaximumStickersReached,
     /// Unauthorized. Provide a valid token and try again
     Unauthorized,
     /// You need to verify your account in order to perform this action
@@ -215,6 +229,8 @@ pub enum ErrorCode {
     ReactionBlocked,
     /// API resource is currently overloaded. Try again a little later
     ApiResourceOverloaded,
+    /// The Stage is already open
+    StageAlreadyOpen,
     /// A status code that Twilight doesn't have registered.
     ///
     /// Please report the number if you see this variant!
@@ -254,9 +270,14 @@ impl ErrorCode {
             Self::UnknownRedistributable => 10036,
             Self::UnknownGiftCode => 10038,
             Self::UnknownGuildTemplate => 10057,
+            Self::UnknownDiscoverableServerCategory => 10059,
+            Self::UnknownSticker => 10060,
             Self::UnknownInteraction => 10062,
             Self::UnknownApplicationCommand => 10063,
             Self::UnknownApplicationCommandPermissions => 10066,
+            Self::UnknownStageInstance => 10067,
+            Self::UnknownGuildMemberVerificationForm => 10068,
+            Self::UnknownGuildWelcomeScreen => 10069,
             Self::BotsCannotUseEndpoint => 20001,
             Self::OnlyBotsCanUseEndpoint => 20002,
             Self::ExplicitContentSendingBlocked => 20009,
@@ -279,9 +300,11 @@ impl ErrorCode {
             Self::MaximumInvitesReached => 30016,
             Self::MaximumAnimatedEmojisReached => 30018,
             Self::MaximumGuildMembersReached => 30019,
+            Self::MaximumServerCategoriesReached => 30030,
             Self::GuildTemplateAlreadyExist => 30031,
             Self::MaximumNonGuildBansReached => 30035,
             Self::MaximumGuildBansFetchesReached => 30037,
+            Self::MaximumStickersReached => 30039,
             Self::Unauthorized => 40001,
             Self::AccountNeedsVerification => 40002,
             Self::OpeningDirectMessageRateLimitReached => 40003,
@@ -328,6 +351,7 @@ impl ErrorCode {
             Self::NoSuchUser => 80004,
             Self::ReactionBlocked => 90001,
             Self::ApiResourceOverloaded => 130_000,
+            Self::StageAlreadyOpen => 150_006,
             Self::Other(other) => *other,
         }
     }
@@ -366,9 +390,14 @@ impl From<u64> for ErrorCode {
             10036 => Self::UnknownRedistributable,
             10038 => Self::UnknownGiftCode,
             10057 => Self::UnknownGuildTemplate,
+            10059 => Self::UnknownDiscoverableServerCategory,
+            10060 => Self::UnknownSticker,
             10062 => Self::UnknownInteraction,
             10063 => Self::UnknownApplicationCommand,
             10066 => Self::UnknownApplicationCommandPermissions,
+            10067 => Self::UnknownStageInstance,
+            10068 => Self::UnknownGuildMemberVerificationForm,
+            10069 => Self::UnknownGuildWelcomeScreen,
             20001 => Self::BotsCannotUseEndpoint,
             20002 => Self::OnlyBotsCanUseEndpoint,
             20022 => Self::AnnouncementRateLimitReached,
@@ -391,9 +420,11 @@ impl From<u64> for ErrorCode {
             30016 => Self::MaximumInvitesReached,
             30018 => Self::MaximumAnimatedEmojisReached,
             30019 => Self::MaximumGuildMembersReached,
+            30030 => Self::MaximumServerCategoriesReached,
             30031 => Self::GuildTemplateAlreadyExist,
             30035 => Self::MaximumNonGuildBansReached,
             30037 => Self::MaximumGuildBansFetchesReached,
+            30039 => Self::MaximumStickersReached,
             40001 => Self::Unauthorized,
             40002 => Self::AccountNeedsVerification,
             40003 => Self::OpeningDirectMessageRateLimitReached,
@@ -440,6 +471,7 @@ impl From<u64> for ErrorCode {
             80004 => Self::NoSuchUser,
             90001 => Self::ReactionBlocked,
             130_000 => Self::ApiResourceOverloaded,
+            150_006 => Self::StageAlreadyOpen,
             other => Self::Other(other),
         }
     }
@@ -478,9 +510,14 @@ impl Display for ErrorCode {
             Self::UnknownRedistributable => f.write_str("Unknown redistributable"),
             Self::UnknownGiftCode => f.write_str("Unknown gift code"),
             Self::UnknownGuildTemplate => f.write_str("Unknown guild template"),
+            Self::UnknownDiscoverableServerCategory => f.write_str("Unknown discoverable server category"),
+            Self::UnknownSticker => f.write_str("Unknown sticker"),
             Self::UnknownInteraction => f.write_str("Unknown interaction"),
             Self::UnknownApplicationCommand => f.write_str("Unknown application command"),
             Self::UnknownApplicationCommandPermissions => f.write_str("Unknown application command permissions"),
+            Self::UnknownStageInstance => f.write_str("Unknown Stage Instance"),
+            Self::UnknownGuildMemberVerificationForm => f.write_str("Unknown Guild Member Verification Form"),
+            Self::UnknownGuildWelcomeScreen => f.write_str("Unknown Guild Welcome Screen"),
             Self::BotsCannotUseEndpoint => f.write_str("Bots cannot use this endpoint"),
             Self::OnlyBotsCanUseEndpoint => f.write_str("Only bots can use this endpoint"),
             Self::ExplicitContentSendingBlocked => f.write_str("Explicit content cannot be sent to the desired recipient(s)"),
@@ -503,9 +540,11 @@ impl Display for ErrorCode {
             Self::MaximumInvitesReached => f.write_str("Maximum number of invites reached (1000)"),
             Self::MaximumAnimatedEmojisReached => f.write_str("Maximum animated emojis reached"),
             Self::MaximumGuildMembersReached => f.write_str("Maximum number of server members reached"),
+            Self::MaximumServerCategoriesReached => f.write_str("Maximum number of server categories has been reached"),
             Self::GuildTemplateAlreadyExist => f.write_str("Guild already has a template"),
             Self::MaximumNonGuildBansReached => f.write_str("Maximum number of bans for non-guild members have been exceeded"),
             Self::MaximumGuildBansFetchesReached => f.write_str("Maximum number of bans fetches has been reached"),
+            Self::MaximumStickersReached => f.write_str("Maximum number of stickers reached"),
             Self::Unauthorized => f.write_str("Unauthorized. Provide a valid token and try again"),
             Self::AccountNeedsVerification => f.write_str("You need to verify your account in order to perform this action"),
             Self::OpeningDirectMessageRateLimitReached => f.write_str("You are opening direct messages too fast"),
@@ -552,6 +591,7 @@ impl Display for ErrorCode {
             Self::NoSuchUser => f.write_str("No users with DiscordTag exist"),
             Self::ReactionBlocked => f.write_str("Reaction was blocked"),
             Self::ApiResourceOverloaded => f.write_str("API resource is currently overloaded. Try again a little later"),
+            Self::StageAlreadyOpen => f.write_str("The Stage is already open"),
             Self::Other(number) => {
                 f.write_str("An error code Twilight doesn't have registered: ")?;
 
@@ -732,6 +772,27 @@ mod tests {
         RatelimitedApiError,
     };
     use serde_test::Token;
+    use static_assertions::assert_impl_all;
+    use std::{convert::TryFrom, fmt::Debug};
+
+    assert_impl_all!(ErrorCode: Clone, Copy, Debug, Eq, PartialEq, Send, Sync);
+
+    #[derive(Clone, Copy)]
+    struct AssertErrorCode<'a> {
+        code: ErrorCode,
+        display: &'a str,
+        num: u64,
+    }
+
+    /// Test that the provided error code has the correct number and that the
+    /// variant's Display implementation is correct.
+    fn assert_error_code(details: AssertErrorCode<'_>) {
+        let AssertErrorCode { code, display, num } = details;
+
+        assert_eq!(num, code.num());
+        assert_eq!(Ok(code), ErrorCode::try_from(num));
+        assert_eq!(display, code.to_string());
+    }
 
     #[test]
     fn test_api_error_deser() {
@@ -816,5 +877,40 @@ mod tests {
                 Token::StructEnd,
             ],
         );
+    }
+
+    /// Test the values and display formatters of error codes.
+    #[test]
+    fn test_variants() {
+        assert_error_code(AssertErrorCode {
+            code: ErrorCode::UnknownDiscoverableServerCategory,
+            display: "Unknown discoverable server category",
+            num: 10059,
+        });
+        assert_error_code(AssertErrorCode {
+            code: ErrorCode::UnknownSticker,
+            display: "Unknown sticker",
+            num: 10060,
+        });
+        assert_error_code(AssertErrorCode {
+            code: ErrorCode::UnknownGuildMemberVerificationForm,
+            display: "Unknown Guild Member Verification Form",
+            num: 10068,
+        });
+        assert_error_code(AssertErrorCode {
+            code: ErrorCode::UnknownGuildWelcomeScreen,
+            display: "Unknown Guild Welcome Screen",
+            num: 10069,
+        });
+        assert_error_code(AssertErrorCode {
+            code: ErrorCode::MaximumServerCategoriesReached,
+            display: "Maximum number of server categories has been reached",
+            num: 30030,
+        });
+        assert_error_code(AssertErrorCode {
+            code: ErrorCode::MaximumStickersReached,
+            display: "Maximum number of stickers reached",
+            num: 30039,
+        });
     }
 }
