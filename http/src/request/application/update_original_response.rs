@@ -12,7 +12,7 @@ use std::{
     fmt::{Display, Formatter, Result as FmtResult},
 };
 use twilight_model::{
-    channel::{embed::Embed, message::AllowedMentions, Attachment},
+    channel::{embed::Embed, message::AllowedMentions, Attachment, Message},
     id::ApplicationId,
 };
 
@@ -156,7 +156,7 @@ pub struct UpdateOriginalResponse<'a> {
     application_id: ApplicationId,
     fields: UpdateOriginalResponseFields,
     files: Vec<(String, Vec<u8>)>,
-    fut: Option<Pending<'a, ()>>,
+    fut: Option<Pending<'a, Message>>,
     http: &'a Client,
     token: String,
 }
@@ -194,6 +194,7 @@ impl<'a> UpdateOriginalResponse<'a> {
     ///
     /// If called, all unspecified attachments will be removed from the message.
     /// If not called, all attachments will be kept.
+    #[deprecated(since = "0.5.5", note = "will be removed in favor of `attachments`")]
     pub fn attachment(mut self, attachment: Attachment) -> Self {
         self.fields.attachments.push(attachment);
 
@@ -331,6 +332,7 @@ impl<'a> UpdateOriginalResponse<'a> {
     /// Attach a file to the original response.
     ///
     /// This method is repeatable.
+    #[deprecated(since = "0.5.5", note = "will be removed in favor of `files`")]
     pub fn file(mut self, name: impl Into<String>, file: impl Into<Vec<u8>>) -> Self {
         self.files.push((name.into(), file.into()));
 
@@ -340,11 +342,13 @@ impl<'a> UpdateOriginalResponse<'a> {
     /// Attach multiple files to the original response.
     pub fn files<N: Into<String>, F: Into<Vec<u8>>>(
         mut self,
-        attachments: impl IntoIterator<Item = (N, F)>,
+        files: impl IntoIterator<Item = (N, F)>,
     ) -> Self {
-        for (name, file) in attachments {
-            self = self.file(name, file);
-        }
+        self.files.extend(
+            files
+                .into_iter()
+                .map(|(name, file)| (name.into(), file.into())),
+        );
 
         self
     }
@@ -394,10 +398,10 @@ impl<'a> UpdateOriginalResponse<'a> {
 
     fn start(&mut self) -> Result<(), HttpError> {
         let request = self.request()?;
-        self.fut.replace(Box::pin(self.http.verify(request)));
+        self.fut.replace(Box::pin(self.http.request(request)));
 
         Ok(())
     }
 }
 
-poll_req!(UpdateOriginalResponse<'_>, ());
+poll_req!(UpdateOriginalResponse<'_>, Message);

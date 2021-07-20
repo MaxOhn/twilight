@@ -24,7 +24,7 @@ impl EmbedValidationError {
     pub const AUTHOR_NAME_LENGTH: usize = 256;
 
     /// The maximum embed description length in codepoints.
-    pub const DESCRIPTION_LENGTH: usize = 2048;
+    pub const DESCRIPTION_LENGTH: usize = 4096;
 
     /// The maximum combined embed length in codepoints.
     pub const EMBED_TOTAL_LENGTH: usize = 6000;
@@ -141,7 +141,7 @@ pub enum EmbedValidationErrorType {
     /// The embed author's name is larger than
     /// [the maximum][`AUTHOR_NAME_LENGTH`].
     ///
-    /// [`AUTHOR_NAME_LENGTH`]: Self::AUTHOR_NAME_LENGTH
+    /// [`AUTHOR_NAME_LENGTH`]: EmbedValidationError::AUTHOR_NAME_LENGTH
     AuthorNameTooLarge {
         /// The number of codepoints that were provided.
         chars: usize,
@@ -149,7 +149,7 @@ pub enum EmbedValidationErrorType {
     /// The embed description is larger than
     /// [the maximum][`DESCRIPTION_LENGTH`].
     ///
-    /// [`DESCRIPTION_LENGTH`]: Self::DESCRIPTION_LENGTH
+    /// [`DESCRIPTION_LENGTH`]: EmbedValidationError::DESCRIPTION_LENGTH
     DescriptionTooLarge {
         /// The number of codepoints that were provided.
         chars: usize,
@@ -158,35 +158,35 @@ pub enum EmbedValidationErrorType {
     /// footer, field names and values, and title - is larger than
     /// [the maximum][`EMBED_TOTAL_LENGTH`].
     ///
-    /// [`EMBED_TOTAL_LENGTH`]: Self::EMBED_TOTAL_LENGTH
+    /// [`EMBED_TOTAL_LENGTH`]: EmbedValidationError::EMBED_TOTAL_LENGTH
     EmbedTooLarge {
         /// The number of codepoints that were provided.
         chars: usize,
     },
     /// A field's name is larger than [the maximum][`FIELD_NAME_LENGTH`].
     ///
-    /// [`FIELD_NAME_LENGTH`]: Self::FIELD_NAME_LENGTH
+    /// [`FIELD_NAME_LENGTH`]: EmbedValidationError::FIELD_NAME_LENGTH
     FieldNameTooLarge {
         /// The number of codepoints that were provided.
         chars: usize,
     },
     /// A field's value is larger than [the maximum][`FIELD_VALUE_LENGTH`].
     ///
-    /// [`FIELD_VALUE_LENGTH`]: Self::FIELD_VALUE_LENGTH
+    /// [`FIELD_VALUE_LENGTH`]: EmbedValidationError::FIELD_VALUE_LENGTH
     FieldValueTooLarge {
         /// The number of codepoints that were provided.
         chars: usize,
     },
     /// The footer text is larger than [the maximum][`FOOTER_TEXT_LENGTH`].
     ///
-    /// [`FOOTER_TEXT_LENGTH`]: Self::FOOTER_TEXT_LENGTH
+    /// [`FOOTER_TEXT_LENGTH`]: EmbedValidationError::FOOTER_TEXT_LENGTH
     FooterTextTooLarge {
         /// The number of codepoints that were provided.
         chars: usize,
     },
     /// The title is larger than [the maximum][`TITLE_LENGTH`].
     ///
-    /// [`TITLE_LENGTH`]: Self::TITLE_LENGTH
+    /// [`TITLE_LENGTH`]: EmbedValidationError::TITLE_LENGTH
     TitleTooLarge {
         /// The number of codepoints that were provided.
         chars: usize,
@@ -194,7 +194,7 @@ pub enum EmbedValidationErrorType {
     /// There are more than [the maximum][`FIELD_COUNT`] number of fields in the
     /// embed.
     ///
-    /// [`FIELD_COUNT`]: Self::FIELD_COUNT
+    /// [`FIELD_COUNT`]: EmbedValidationError::FIELD_COUNT
     TooManyFields {
         /// The number of fields that were provided.
         amount: usize,
@@ -562,10 +562,13 @@ mod tests {
         embed.description.replace(str::repeat("a", 2048));
         assert!(super::embed(&embed).is_ok());
 
-        embed.description.replace(str::repeat("a", 2049));
+        embed.description.replace(str::repeat("a", 4096));
+        assert!(super::embed(&embed).is_ok());
+
+        embed.description.replace(str::repeat("a", 4097));
         assert!(matches!(
             super::embed(&embed).unwrap_err().kind(),
-            EmbedValidationErrorType::DescriptionTooLarge { chars: 2049 }
+            EmbedValidationErrorType::DescriptionTooLarge { chars: 4097 }
         ));
     }
 

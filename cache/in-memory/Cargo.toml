@@ -12,7 +12,7 @@ name = "twilight-cache-inmemory"
 publish = false
 repository = "https://github.com/twilight-rs/twilight"
 readme = "README.md"
-version = "0.5.1"
+version = "0.5.2"
 
 [dependencies]
 bitflags = { default-features = false, version = "1" }
@@ -25,8 +25,18 @@ serde = { default-features = false, features = ["derive"], version = "1" }
 serde_cbor = { default-features = false, features = ["std"], version = "0.11"}
 twilight-model = { default-features = false, path = "../../model" }
 
+# Optional dependencies.
+twilight-util = { default-features = false, features = ["permission-calculator"], optional = true, path = "../../util" }
+
 [dev-dependencies]
 futures = { default-features = false, version = "0.3" }
 static_assertions = { default-features = false, version = "1" }
 tokio = { default-features = false, features = ["macros", "rt-multi-thread"], version = "1.0" }
 twilight-gateway = { path = "../../gateway" }
+
+[features]
+permission-calculator = ["twilight-util"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

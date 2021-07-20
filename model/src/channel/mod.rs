@@ -78,6 +78,15 @@ impl Channel {
         }
     }
 
+    /// Type of the channel.
+    pub const fn kind(&self) -> ChannelType {
+        match self {
+            Self::Group(c) => c.kind,
+            Self::Guild(c) => c.kind(),
+            Self::Private(c) => c.kind,
+        }
+    }
+
     /// Return an immutable reference to the name of the inner channel.
     ///
     /// The group variant might not always have a name, since they are optional
@@ -122,6 +131,15 @@ impl GuildChannel {
         }
     }
 
+    /// Type of the guild channel.
+    pub const fn kind(&self) -> ChannelType {
+        match self {
+            Self::Category(c) => c.kind,
+            Self::Text(c) => c.kind,
+            Self::Stage(c) | Self::Voice(c) => c.kind,
+        }
+    }
+
     /// Return an immutable reference to the name of the inner guild channel.
     pub fn name(&self) -> &str {
         match self {
@@ -147,6 +165,7 @@ enum GuildChannelField {
     PermissionOverwrites,
     Position,
     RateLimitPerUser,
+    RtcRegion,
     Topic,
     Type,
     UserLimit,
@@ -184,6 +203,7 @@ impl<'de> Visitor<'de> for GuildChannelVisitor {
         let mut permission_overwrites = None;
         let mut position = None;
         let mut rate_limit_per_user = None;
+        let mut rtc_region: Option<Option<String>> = None;
         let mut topic: Option<Option<String>> = None;
         let mut user_limit = None;
         let mut video_quality_mode = None;
@@ -297,6 +317,13 @@ impl<'de> Visitor<'de> for GuildChannelVisitor {
 
                     rate_limit_per_user = map.next_value::<Option<u64>>()?;
                 }
+                GuildChannelField::RtcRegion => {
+                    if rtc_region.is_some() {
+                        return Err(DeError::duplicate_field("rtc_region"));
+                    }
+
+                    rtc_region = Some(map.next_value()?);
+                }
                 GuildChannelField::Topic => {
                     if topic.is_some() {
                         return Err(DeError::duplicate_field("topic"));
@@ -359,19 +386,20 @@ impl<'de> Visitor<'de> for GuildChannelVisitor {
             }
             ChannelType::GuildVoice | ChannelType::GuildStageVoice => {
                 let bitrate = bitrate.ok_or_else(|| DeError::missing_field("bitrate"))?;
+                let rtc_region = rtc_region.unwrap_or_default();
                 let user_limit = user_limit.ok_or_else(|| DeError::missing_field("user_limit"))?;
 
                 tracing::trace!(%bitrate, ?user_limit, "handling voice channel");
                 let voice_channel = VoiceChannel {
-                    id,
                     bitrate,
                     guild_id,
+                    id,
                     kind,
                     name,
                     parent_id,
                     permission_overwrites,
                     position,
-                    rtc_region: None,
+                    rtc_region,
                     user_limit,
                     video_quality_mode,
                 };
@@ -535,6 +563,48 @@ mod tests {
             ChannelId(789)
         );
         assert_eq!(Channel::Private(private()).id(), ChannelId(234));
+    }
+
+    #[test]
+    fn test_channel_kind() {
+        assert_eq!(
+            Channel::Guild(GuildChannel::Category(guild_category())).kind(),
+            ChannelType::GuildCategory
+        );
+        assert_eq!(
+            Channel::Guild(GuildChannel::Stage(guild_stage())).kind(),
+            ChannelType::GuildStageVoice
+        );
+        assert_eq!(
+            Channel::Guild(GuildChannel::Text(guild_text())).kind(),
+            ChannelType::GuildText
+        );
+        assert_eq!(
+            Channel::Guild(GuildChannel::Stage(guild_voice())).kind(),
+            ChannelType::GuildVoice
+        );
+        assert_eq!(Channel::Group(group()).kind(), ChannelType::Group);
+        assert_eq!(Channel::Private(private()).kind(), ChannelType::Private);
+    }
+
+    #[test]
+    fn test_guild_channel_kind() {
+        assert_eq!(
+            GuildChannel::Category(guild_category()).kind(),
+            ChannelType::GuildCategory
+        );
+        assert_eq!(
+            GuildChannel::Stage(guild_stage()).kind(),
+            ChannelType::GuildStageVoice
+        );
+        assert_eq!(
+            GuildChannel::Text(guild_text()).kind(),
+            ChannelType::GuildText
+        );
+        assert_eq!(
+            GuildChannel::Stage(guild_voice()).kind(),
+            ChannelType::GuildVoice
+        );
     }
 
     #[test]
